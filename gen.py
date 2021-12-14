@@ -74,7 +74,7 @@ def get_log_file(args):
     :param args:
     :return: the name for the log file
     """
-    return "n"+str(args.params) + "_l"+str(args.param_l) + "_l1"+str(args.param_l1) + "_c"+str(args.cutoff) +  "_w1"+str(args.param_w1) + "_p"+str(args.param_p) + "_t" + str(args.bjmm_outer_threads*args.threads) + "_bjfl" + str(args.bjmm_fulllength) + "_bjsa" + str(args.bjmm_special_alignment) + "_hm1bs" + str(args.bjmm_hm1_bucketsize) + "_hm2bs" + str(args.bjmm_hm2_bucketsize) + "_hm1nb" + str(args.bjmm_hm1_nrbuckets) + "_hm2nb" + str(args.bjmm_hm2_nrbuckets) + "qfdidoom" + str(args.quasicyclic_force_disable_doom) + "_" + CODE_TARGET + ".log"
+    return "n"+str(args.params) + "_l"+str(args.param_l) + "_l1"+str(args.param_l1) + "_p"+str(args.param_p) + "_t" + str(args.outer_threads*args.threads) + "_bjfl" + str(args.bjmm_fulllength) + "_bjsa" + str(args.bjmm_special_alignment) + "_hm1bs" + str(args.hm1_bucketsize) + "_hm2bs" + str(args.hm2_bucketsize) + "_hm1nb" + str(args.hm1_nrbuckets) + "_hm2nb" + str(args.hm2_nrbuckets) + "qfdidoom" + str(args.quasicyclic_force_disable_doom) + "_" + CODE_TARGET + ".log"
 
 
 def ternaryn2file(n: int):

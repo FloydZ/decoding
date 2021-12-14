@@ -1,6 +1,6 @@
 [submodule "deps/cryptanalysislib"]
 	path = deps/cryptanalysislib
-	url = https://github.com/FloydZ/cryptanalysislib
+	url = git@github.com:FloydZ/cryptanalysislib.git
 [submodule "src/rust/deps/m4ri-rust"]
 	path = src/rust/deps/m4ri-rust
 	url = https://github.com/thomwiggers/m4ri-rust
