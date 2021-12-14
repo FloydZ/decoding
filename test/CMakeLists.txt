@@ -1,0 +1,16 @@
+#TESTS Flags
+file(GLOB TEST_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp)
+foreach(testfile ${TEST_SOURCES})
+    file(RELATIVE_PATH filename ${CMAKE_CURRENT_SOURCE_DIR} ${testfile})
+    string(REPLACE ".cpp" "" file ${filename})
+    add_executable(${file} ${testfile})
+    target_compile_options(${file} PUBLIC ${COMPILE_TEST_FLAGS} ${TCMALLOC_LIBRARIES})
+#    add_dependencies(${file} cryptanalysislib_project)
+    target_link_libraries(${file}  ${LINK_TEST_FLAGS})
+endforeach(testfile ${TEST_SOURCES})
+
+add_subdirectory(decoding)
+add_subdirectory(mceliece)
+add_subdirectory(quasicyclic)
+add_subdirectory(lowweight)
+add_subdirectory(ternary)

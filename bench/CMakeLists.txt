@@ -1,0 +1,10 @@
+set(BENCH_DECODING_FLAGS -lgtest -pthread gmp fplll gmpxx libm4ri.a m png)
+set(COMPILE_BENCH_FLAGS -g -pthread)
+
+file(GLOB BENCH_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp)
+foreach(benchfile ${BENCH_SOURCES})
+    file(RELATIVE_PATH filename ${CMAKE_CURRENT_SOURCE_DIR} ${benchfile})
+    string(REPLACE ".cpp" "" file ${filename})
+    add_executable(bench_b63_decoding_${file} ${benchfile} )
+    target_link_libraries(bench_b63_decoding_${file} ${BENCH_DECODING_FLAGS})
+endforeach( benchfile ${BENCH_SOURCES})

@@ -1,0 +1,10 @@
+file(GLOB TEST_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp)
+
+foreach(testfile ${TEST_SOURCES})
+    file(RELATIVE_PATH filename ${CMAKE_CURRENT_SOURCE_DIR} ${testfile})
+    string(REPLACE ".cpp" "" file ${filename})
+    add_executable(quasicyclic_${file} ${testfile})
+    target_compile_options(quasicyclic_${file} PUBLIC ${COMPILE_TEST_FLAGS})
+    #add_dependencies(quasicyclic_{file} cryptanalysislib_project)
+    target_link_libraries(quasicyclic_${file} ${LINK_TEST_FLAGS} ${TCMALLOC_LIBRARIES})
+endforeach(testfile ${TEST_SOURCES})
