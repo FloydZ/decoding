@@ -124,7 +124,7 @@ def _list_merge_complexity(L, l, hmap):
         return 2 * L + L ** 2 // 2 ** l
 
 
-def _indyk_motwani_complexity(L, l, w, hmap,lam=0):
+def _indyk_motwani_complexity(L, l, w, hmap, lam=0):
     """
     Complexity of Indyk-Motwani nearest neighbor search
 

@@ -2,7 +2,7 @@
 #define SMALLSECRETLWE_EMZ_H
 
 #include "sort.h"
-#include "decoding.h"
+#include "leebrickell.h"
 #include "list_fill.h"
 
 using DiffList = std::vector<std::vector<std::pair<uint64_t, uint64_t>>>;
@@ -70,9 +70,9 @@ using DiffList = std::vector<std::vector<std::pair<uint64_t, uint64_t>>>;
 /// \tparam number_buckets	number of buckets used in the bucket sort algorithm
 /// \tparam tries			number of tree rebuild with differetn intermediate targets
 /// \param e		output: solution error
-/// \param s		const input:	goppa code syndrom.
-/// \param A		const input: McEliece Matrix
-/// \param 			exit_loops terminate the programm after `exit_loops` runs of the outer loops
+/// \param s		const input: syndrome
+/// \param A		const input: Parity Check matrix Matrix
+/// \param 			exit_loops terminate the program after `exit_loops` runs of the outer loops
 /// \return	1 on success. 0 on not found.
 struct ConfigEMZ2DThread {
 public:
@@ -100,16 +100,6 @@ public:
 template<const ConfigEMZ2DThread &config, class List>
 class EMZ {
 private:
-	typedef typename DecodingList::LabelType DecodingLabel;
-	typedef typename DecodingList::ValueType DecodingValue;
-	typedef typename DecodingList::ElementType DecodingElement;
-	typedef typename DecodingList::MatrixType DecodingMatrix;
-
-	// TODO auf größe von l anpassen
-	using ArgumentLimbType  = uint64_t;
-	using IndexType         = uint64_t;
-	using LoadType          = uint64_t;
-
 	// recalculated lengths if we cut of `c` coordinates
 	constexpr static uint64_t n = config.n;
 	constexpr static uint64_t k = config.k;
@@ -122,6 +112,19 @@ private:
 	constexpr static uint64_t w1 = config.w1;
 	constexpr static uint64_t w2 = config.w2;
 	constexpr static uint64_t threads = config.threads;
+
+	using DecodingValue     = Value_T<BinaryContainer<k + l>>;
+	using DecodingLabel     = Label_T<BinaryContainer<n - k>>;
+	using DecodingMatrix    = mzd_t *;
+	using DecodingElement   = Element_T<DecodingValue, DecodingLabel, DecodingMatrix>;
+	using DecodingList      = List_T<DecodingElement>;
+	using DecodingTree      = Tree_T<DecodingList>;
+
+	// TODO auf größe von l anpassen
+	using ArgumentLimbType  = uint64_t;
+	using IndexType         = uint64_t;
+	using LoadType          = uint64_t;
+
 
 	// TODO größen auf neue hashmap anpassen.
 	// expected size of baselists, intermediate lists and the output list
@@ -215,7 +218,7 @@ public:
 		mzp_t *permutation = mzp_init(n_prime);
 
 		// return value of `check_resultlist`. __MUST__ not be freed anywhere.
-		mzd_t *t;
+		//mzd_t *t;
 		constexpr static ConfigCheckResultList configCheckResultList(n, k, w, config.c, l, l1);
 
 		uint64_t outer_loops = 0;   // Performance counter.
@@ -224,7 +227,7 @@ public:
 		const uint64_t m4ri_k = m4ri_opt_k(work_matrix_H->nrows, work_matrix_H->ncols, 0);
 
 		// TODO omp implementieren.
-		const uint32_t tid = 0;// omp_get_thread_num();
+		//const uint32_t tid = 0;// omp_get_thread_num();
 
 		// precompute grey code for m4ri
 		customMatrixData *matrix_data = init_matrix_data(work_matrix_H->ncols);
@@ -249,7 +252,7 @@ public:
 			target.data().from_m4ri(working_s_T);
 			zero.zero();
 
-			const uint32_t tid = omp_get_thread_num();
+			// const uint32_t tid = omp_get_thread_num();
 
 			for (int try_i = 0; try_i < config.tries; ++try_i) {
 				iR.random();    // generate a random intermediate target.
@@ -262,7 +265,6 @@ public:
 			}
 		}
 
-		finish:
 		std::cout <<  MULTITHREADED_WRITE("Thread: " << std::this_thread::get_id() << " " << ) "number of outer loops: " << outer_loops << "\n";
 
 
@@ -285,7 +287,7 @@ public:
 };
 
 template<const uint64_t n, const uint64_t c, const uint64_t k, const uint64_t l, const uint64_t w, const uint64_t p, const uint64_t d,
-		const uint64_t l1, const uint64_t w1, const uint64_t l2, const uint64_t w2, const uint64_t epsilon, const uint64_t r1=0, const uint64_t number_buckets=13, const uint64_t tries=1, const uint64_t number_bucketsearch_retries_=1, const uint64_t exit_loops=99999, class DecodingList=DecodingList>
+		const uint64_t l1, const uint64_t w1, const uint64_t l2, const uint64_t w2, const uint64_t epsilon, const uint64_t r1=0, const uint64_t number_buckets=13, const uint64_t tries=1, const uint64_t number_bucketsearch_retries_=1, const uint64_t exit_loops=99999, class DecodingList>
 int emz_d2_thread(mzd_t *e, const mzd_t *const s, const mzd_t *const A, const DecodingList &BaseList1, const DecodingList &BaseList2, const DiffList &changelist11, const DiffList &changelist12, const DiffList &changelist21, const DiffList &changelist22
 #ifdef CHECK_PERM
 	, const mzd_t *correct_e
@@ -612,8 +614,8 @@ int emz_d2_thread(mzd_t *e, const mzd_t *const s, const mzd_t *const A, const De
 }
 
 
-template<const uint64_t n, const uint64_t c, const uint64_t k, const uint64_t l, const uint64_t w, const uint64_t p, const uint64_t d,
-        const uint64_t l1, const uint64_t w1, const uint64_t l2, const uint64_t w2, const uint64_t epsilon, const uint64_t r1=0, const uint64_t number_buckets=13, const uint64_t tries=1, const uint64_t number_bucketsearch_retries_=1, const uint64_t exit_loops=99999, class DecodingList=DecodingList>
+template<class DecodingList, const uint64_t n, const uint64_t c, const uint64_t k, const uint64_t l, const uint64_t w, const uint64_t p, const uint64_t d,
+        const uint64_t l1, const uint64_t w1, const uint64_t l2, const uint64_t w2, const uint64_t epsilon, const uint64_t r1=0, const uint64_t number_buckets=13, const uint64_t tries=1, const uint64_t number_bucketsearch_retries_=1, const uint64_t exit_loops=99999>
 int emz_d2(mzd_t *e, const mzd_t *const s, const mzd_t *const A
 #ifdef CHECK_PERM
 		, const mzd_t *correct_e
@@ -627,7 +629,7 @@ int emz_d2(mzd_t *e, const mzd_t *const s, const mzd_t *const A
 
 
 	// recalculated lengths if we cut of `c` coordinates
-	constexpr uint64_t n_prime = n-c;
+	//constexpr uint64_t n_prime = n-c;
 	constexpr uint64_t k_prime = k-c;
 
 	constexpr uint64_t size_baselist = bc(l1/2, w1)*bc((k_prime/2)+epsilon,w2);
@@ -682,7 +684,7 @@ template<const uint64_t n, const uint64_t c, const uint64_t k, const uint64_t l,
 		const uint64_t l1, const uint64_t w1, const uint64_t l2, const uint64_t w2, const uint64_t epsilon, const uint64_t r1=0, const uint64_t number_buckets=13, const uint64_t tries=1,  const uint64_t number_bucketsearch_retries_=1, const uint64_t exit_loops=99999>
 int emz_d2_outer(mzd_t *e, const mzd_t *const s, const mzd_t *const A) {
 	constexpr uint64_t n_prime = n-c;
-	constexpr uint64_t k_prime = k-c;
+	//constexpr uint64_t k_prime = k-c;
 
 #ifdef CHECK_PERM
 	mzd_t *correct_e = mzd_from_str(1,n,correct_e_str);

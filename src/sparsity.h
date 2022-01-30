@@ -111,7 +111,6 @@ unsigned int sparsityNN(mzd_t *A, customMatrixData *matrix_data) {
 	// for each row
 	for (int i = 0; i < k; ++i) {
 		j = findNN<n,t,k>(A, i);
-//		j = findNN(A, i, n, t, k);
 
 		if (j == -1){ continue; }
 		mzd_row_xor(A, i, j);
@@ -119,13 +118,11 @@ unsigned int sparsityNN(mzd_t *A, customMatrixData *matrix_data) {
 
 	for (int i = 0; i < k; ++i) {
 		j = findNN<n,t,k>(A, i);
-//		j = findNN(A, i, n, t, k);
 
 		if (j == -1){ continue; }
 		mzd_row_xor(A, i, j);
 	}
 
-	// print_some_more_info(A, n, t);
 	return 0;
 }
 
@@ -138,7 +135,6 @@ unsigned int sparsityNN2(mzd_t *A, customMatrixData *matrix_data) {
 
 	const unsigned int m4ri_k = m4ri_opt_k(k, A->ncols, 0);
 	matrix_echelonize_partial(A, m4ri_k, k, matrix_data, 0);
-	unsigned int j;
 
 	// static const uint32_t iters = 1;
 	static uint32_t weights[k];
@@ -353,7 +349,7 @@ int Sparsity_thread(mzd_t *e, const mzd_t *const s, const mzd_t *const A, Perfor
 		matrix_create_random_permutation(work_matrix_H, work_matrix_H_T, P_C);
 		sparsityNN<configSparsityNN>(work_matrix_H, matrix_data);
 
-		// if syndrom is below threshold
+		// if syndrome is below threshold
 		const unsigned int weight = hamming_weight_column(work_matrix_H, config.n);
 		if (weight > config.thresh) {
 			continue;
@@ -369,12 +365,6 @@ int Sparsity_thread(mzd_t *e, const mzd_t *const s, const mzd_t *const A, Perfor
             }                                                               \
 
             CRYPTANALYSELIB_REPEAT(SPARSITY_HELPER, 3)
-            // old approach
-            //ret = static_for<num_prange_iters, int, prange_thread_single<configPrange>>(
-            //        e, prange_M2, prange_M2_T, prange_C, prange_matrix_data);
-            //if (unlikely((ret) MULTITHREADED_WRITE(&& !finished.load()))) {
-            //    break;
-            //}
         } else {
             ret = prange_thread<configPrange>(e, prange_M2, prange_M2_T, prange_C, prange_matrix_data);
             if (unlikely((ret) MULTITHREADED_WRITE(&& !finished.load()))) {
@@ -397,10 +387,7 @@ int Sparsity_thread(mzd_t *e, const mzd_t *const s, const mzd_t *const A, Perfor
 	free_matrix_data(matrix_data);
 	free_matrix_data(prange_matrix_data);
 
-	//PERFORMANE_WRITE(perf->loops += loops);
-	//PERFORMANE_WRITE(perf->false_positives += false_positives);
-
-	// std::cout << "McElieceV2 Loops: " << loops << " * prange loops: " << num_prange_iters << " false_positive: " << false_positive << " " << double(false_positive)/double(loops) * 100.0 << "\n";
+	std::cout << loops << " " << false_positives << "\n";
 	return ret;
 }
 

@@ -48,19 +48,24 @@ int main(int argc, char** argv) {
 
 	id_t pid = getpid();
 	setpriority(PRIO_PROCESS, pid, -20);
-	if (setpriority(PRIO_PROCESS, pid, -20) != 0)
-		std::cout << omp_get_thread_num() << ", tid: " << given_tid << ". could not set NICE value\n";
+	if (setpriority(PRIO_PROCESS, pid, -20) != 0) {
+		//std::cout << ". could not set NICE value\n";
+	}
+
+	// Enable multiple teams
+	if (NUMBER_OUTER_THREADS > 1 && NUMBER_THREADS > 1) {
+		omp_set_nested(2);
+	}
 
 #if TERNARY != 0
 	static constexpr ListIteration listIters = TERNARY_ENUMERATION_TYPE == 0 ? SinglePartialSingle : EnumSinglePartialSingle;
-	static constexpr ConfigMMTTernary MMTconfig(G_n, G_k, G_w/2, G_p, G_l, G_l1, BJMM_HM1_NRB, BJMM_HM2_NRB, BJMM_HM1_SIZEB, BJMM_HM2_SIZEB, TERNARY_NR1, TERNARY_NR2, TERNARY_FILTER2, G_k+G_l-TERNARY_ALPHA, listIters);
+	static constexpr ConfigMMTTernary MMTconfig(n, k, G_w/2, G_p, G_l, G_l1, HM1_NRB, HM2_NRB, HM1_SIZEB, HM2_SIZEB, TERNARY_NR1, TERNARY_NR2, TERNARY_FILTER2, k+G_l-TERNARY_ALPHA, listIters);
 	using MatrixType = TernaryMMT<MMTconfig>::Matrix;
 
 	MatrixType AT(n-k, n, h);
 	MatrixType A(n, n-k);
 	MatrixType ee(n, 1);
 	MatrixType ss(n-k, 1, s);
-	MatrixType ss_tmp(n-k, 1, s);
 
 	MatrixType ee_T(n, 1);
 	MatrixType::transpose(A, AT);
@@ -69,12 +74,9 @@ int main(int argc, char** argv) {
 		ee_T.set(2, 0, i);
 	}
 #else
-
-#if USE_MO
-	static constexpr ConfigBJMM config(n, k, G_w, G_p, G_l1, G_l1, HM1_SIZEB, HM2_SIZEB, HM1_NRB, 1, G_w-addweightthresh, NUMBER_THREADS, USE_DOOM, BJMM_DOOM_SPECIAL_FORM, FULLLENGTH, CUTOFF, LOW_WEIGHT, MO_l2, MO_NRHM, false, HM1_USESTDBINARYSEARCH, HM2_USESTDBINARYSEARCH, HM1_USEINTERPOLATIONSEARCH, HM2_USEINTERPOLATIONSEARCH, HM1_USELINEARSEARCH, HM2_USELINEARSEARCH, HM1_USELOAD, HM2_USELOAD);
-#else
-	static constexpr ConfigBJMM config(n, k, G_w, G_p, G_l, G_l1, HM1_SIZEB, HM2_SIZEB, HM1_NRB, HM2_NRB, G_w-addweightthresh, NUMBER_THREADS, USE_DOOM, BJMM_DOOM_SPECIAL_FORM, FULLLENGTH, CUTOFF, LOW_WEIGHT, MO_l2, MO_NRHM, false, HM1_USESTDBINARYSEARCH, HM2_USESTDBINARYSEARCH, HM1_USEINTERPOLATIONSEARCH, HM2_USEINTERPOLATIONSEARCH, HM1_USELINEARSEARCH, HM2_USELINEARSEARCH, HM1_USELOAD, HM2_USELOAD);
-#endif
+	constexpr uint32_t weight_thresh = G_w-addweightthresh;
+	constexpr uint32_t mo_l = USE_MO ? G_l1 : G_l;
+	static constexpr ConfigBJMM config(n, k, G_w, G_p, G_l, G_l1, HM1_SIZEB, HM2_SIZEB, HM1_NRB, HM2_NRB, weight_thresh, NUMBER_THREADS, NUMBER_OUTER_THREADS, USE_DOOM, FULLLENGTH, CUTOFF, LOW_WEIGHT, MO_l2, MO_NRHM, ifactor, no_values, HM1_USESTDBINARYSEARCH, HM2_USESTDBINARYSEARCH, HM1_USEINTERPOLATIONSEARCH, HM2_USEINTERPOLATIONSEARCH, HM1_USELINEARSEARCH, HM2_USELINEARSEARCH, HM1_USELOAD, HM2_USELOAD, HM1_SAVEFULL128BIT, HM2_SAVEFULL128BIT, HM1_EXTENDTOTRIPLE, HM2_EXTENDTOTRIPLE, HM1_USEPREFETCH, HM2_USEPREFETCH, HM1_USEATOMICLOAD, HM2_USEATOMICLOAD, HM1_USEPACKED, HM2_USEPACKED, high_weight);
 	mzd_t *AT = mzd_from_str(n, n-k, h);
 	mzd_t *A = mzd_transpose(NULL, AT);
 	mzd_t *ss;
@@ -84,14 +86,14 @@ int main(int argc, char** argv) {
 		ss = mzd_from_str(1, n-k, s);
 	}
 
-	mzd_t *ss_tmp = mzd_init(ss->ncols, ss->nrows);
-	mzd_t *ss_tmp_T = mzd_init( ss->nrows, ss->ncols);
-
 	mzd_t *ee = mzd_init(1, n);
 	mzd_t *ee_T = mzd_init(n, 1);
+
 #endif
 
-#pragma omp parallel default(none) shared(std::cout, ee, ss, A, ss_tmp, ee_T, given_tid, loops_sum, finished, already_printed) num_threads(NUMBER_OUTER_THREADS) if(NUMBER_OUTER_THREADS != 1)
+#if NUMBER_OUTER_THREADS > 1
+#pragma omp parallel default(none) shared(std::cout, ee, ss, A, ee_T, given_tid, loops_sum, finished, already_printed) num_threads(NUMBER_OUTER_THREADS)
+#endif
 	{
 		const uint32_t e_tid = NUMBER_OUTER_THREADS == 1 ? 0 : omp_get_thread_num();
 		const double time = (double)clock();
@@ -100,13 +102,15 @@ int main(int argc, char** argv) {
 		uint64_t r;
 
 #if TERNARY != 0
-		TernaryMMT<MMTconfig> *obj = new TernaryMMT<MMTconfig>(&ee, A, ss, e_tid);
-#elif USE_NN
-		BJMMNN<config> *obj = new BJMMNN<config>(ee, ss, A, e_tid);
-#elif USE_MO
-		MO<config> *obj = new MO<config>(ee, ss, A, e_tid);
+		TernaryMMT<MMTconfig> *obj  = new TernaryMMT<MMTconfig>(&ee, A, ss, e_tid);
 #else
-		BJMM<config> *obj = new BJMM<config>(ee, ss, A, e_tid);
+#if USE_NN != 0
+		BJMMNN<config> *obj         = new BJMMNN<config>(ee, ss, A, e_tid);
+#elif USE_MO != 0
+		MO<config> *obj             = new MO<config>(ee, ss, A, e_tid);
+#else
+		BJMM<config> *obj           = new BJMM<config>(ee, ss, A, e_tid);
+#endif
 #endif
 
 		// This is it.
@@ -118,46 +122,41 @@ int main(int argc, char** argv) {
 		// measure needed loops. Race cond. but who cares.
 		loops_sum += r;
 
-#pragma omp critical
+#pragma omp single
 		{
 			if (!already_printed) {
 				already_printed = true;
 
 				const double lph = NUMBER_OUTER_THREADS * double(3600.) * double(r) / time2;
 				std::cout << "Found outer tid:" << omp_get_thread_num() << ", e_tid: " << e_tid << " found solution, time: " << time2 << ", round: " << r << " loops/h:" << lph << "\n";
-				FILE *f = fopen("solution.txt","a");
 #if TERNARY
 				ee.print();
 				MatrixType::InternalRowType::sub(ee.__data[0], ee.__data[0], ee_T.__data[0]);
 				ee.print();
 #else
+				FILE *f = fopen("solution.txt","a");
 				mzd_fprint(f, ee);
-#endif
-
 				fprintf(f, "%lf s\n", time2);
 				fprintf(f, "%lu iters\n", r);
 				fprintf(f, "%lf loops/h\n", lph);
 
-#ifndef TERNARY
 				if constexpr(LOW_WEIGHT) {
 					fprintf(f, "%u\n", hamming_weight(ee));
 				}
-#endif
-
 				fclose(f);
+#endif
 			}
 		}
-
-		// cleanup mem
-		delete(obj);
 	}
 
+#if !TERNARY
 	// write the results into a file:
 	const double ttime = ((double)clock() - SumTime)/CLOCKS_PER_SEC;
 	std::cout << "Finished: SUMTime: " << ttime << ", SUMLoops: " << loops_sum << ":" << loops_sum/NUMBER_OUTER_THREADS << "\n" << std::flush;
 	FILE *f = fopen("solution.txt","a");
 	fprintf(f, "loops_sum: %lu\n", loops_sum);
 	fclose(f);
+#endif
 
 	return 0;
 }

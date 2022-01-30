@@ -115,13 +115,13 @@ class BJMMHybridTree : public BJMM<config> {
 
 public:
 	BJMMHybridTree(mzd_t *e, const mzd_t *const s, const mzd_t *const A, const uint32_t ext_tid = 0)
-			: BJMM<config>(e, s, A, ext_tid, false) {
+			noexcept : BJMM<config>(e, s, A, ext_tid, false) {
 		hm = new ParallelBucketSort<chm, DecodingList, ArgumentLimbType, IndexType, &Hash>();
 		this->template BJMM_prepare_generate_base_mitm2_with_chase2(bwL1, bwL2, this->cL1, this->cL2);
 	};
 
 	void __attribute__ ((noinline))
-	check_final_list(const LabelContainerType &a, const ValueContainerType &b, const uint32_t tid) {
+	check_final_list(const LabelContainerType &a, const ValueContainerType &b, const uint32_t tid) noexcept {
 		//#pragma omp critical
 		if (this->not_found) {
 			//#pragma omp atomic write
@@ -146,7 +146,7 @@ public:
 	}
 
 	// weg von den hashmaps zurück zu den bäumen.
-	uint64_t run() {
+	uint64_t run() noexcept {
 		// count the loops we iterated
 		loops = 0;
 
@@ -317,15 +317,16 @@ public:
 								ValueContainerType::add(value, iLl[i].get_value().data(), iLr[j].get_value().data());
 								// std::cout << iLl[i].get_value().data() << "\n" << iLr[j].get_value() << "\n";
 								check_final_list(label, value, tid);
-							}
-						}
-					}
-				}
-
-			}
+							} // found the solution
+						} // while lvl2 matches
+					} // for every element in the intermediate list
+				} // for every hashmap
+			} // end pragma omp parallel
 
 			// print loop information
-			print_info();
+			if (unlikely((loops % config.print_loops) == 0)) {
+				periodic_info();
+			}
 
 			//  update the global loop counter
 			OUTER_MULTITHREADED_WRITE(
@@ -336,19 +337,17 @@ public:
 			})
 
 			loops += 1;
-		} // end pragma omp parallel
+		} // end not found loop
 
 
 		return loops;
 	}
 
-	void __attribute__ ((noinline)) print_info(){
-		if (unlikely((loops % config.print_loops) == 0)) {
-			std::cout << "BJMMF: tid:" << omp_get_thread_num() << ", loops: " << loops;
-			std::cout << ", log(inner_loops): " << this->LogLoops(n) << ", inner_loops: " << this->Loops(n, 0) << "\n";
-			std::cout << "iFactor: " << iFactor << ", liLsize: " << liLsize << ", riLsize: " << riLsize << "\n";
-			hm->print();
-		}
+	void __attribute__ ((noinline)) periodic_info() noexcept {
+		std::cout << "BJMMF: tid:" << omp_get_thread_num() << ", loops: " << loops;
+		std::cout << ", log(inner_loops): " << this->LogLoops(n) << ", inner_loops: " << this->Loops(n, 0) << "\n";
+		std::cout << "iFactor: " << iFactor << ", liLsize: " << liLsize << ", riLsize: " << riLsize << "\n";
+		hm->print();
 	}
 };
 

@@ -46,7 +46,7 @@ class BJMMClassicalTree : public BJMM<config> {
 public:
 	BJMMClassicalTree(mzd_t *e, const mzd_t *const s, const mzd_t *const A,
 					  const uint32_t ext_tid = 0)
-			: BJMM<config>(e, s, A, ext_tid, false) {
+			noexcept : BJMM<config>(e, s, A, ext_tid, false) {
 		this->template BJMM_prepare_generate_base_mitm2_with_chase2(bwL1, bwL2, this->cL1, this->cL2);
 
 	};
@@ -59,7 +59,7 @@ private:
 	/// \param b element if the right indermediate list
 	/// \param tid	thread id which found the element. actually useless.
 	void __attribute__ ((noinline))
-	check_final_list(const DecodingElement &a, const DecodingElement &b, const uint32_t tid) {
+	check_final_list(const DecodingElement &a, const DecodingElement &b, const uint32_t tid) noexcept {
 		//#pragma omp critical
 		if (this->not_found) {
 			//#pragma omp atomic write
@@ -89,15 +89,13 @@ private:
 	}
 
 public:
-	// executes the algorithm and returns the number of loops needed to find the solution
-	uint64_t run() {
-		// count the loops we iterated
-		uint64_t loops = 0;
 
+	// executes the algorithm and returns the number of loops needed to find the solution
+	uint64_t run() noexcept {
 		// we have to reset this value, so its possible to rerun the algo more often
 		this->not_found = true;
-		while (this->not_found && loops < config.loops) {
-			loops += 1;
+		while (this->not_found && this->loops < config.loops) {
+			this->loops += 1;
 			matrix_create_random_permutation(this->work_matrix_H, this->work_matrix_H_T, this->permutation);
 			matrix_echelonize_partial_plusfix(this->work_matrix_H, config.m4ri_k, n - k - this->l, this->matrix_data, 0, n - k - this->l, 0, this->permutation);
 
@@ -106,19 +104,18 @@ public:
 
 			Matrix_T<mzd_t *> HH((mzd_t *) this->H);
 			if constexpr(!config.DOOM) {
-				this->target.column_from_m4ri(this->work_matrix_H, this->n-this->c-config.LOWWEIGHT);
+				this->target.data().column_from_m4ri(this->work_matrix_H, this->n-this->c-config.LOWWEIGHT);
 			}
 
 			iT.random();
-//#pragma omp parallel default(none) shared(cout, wL1, wL2, this->cL1, this->cL2, HH, this->H, this->HT, iT, this->target, this->not_found, loops) num_threads(this->threads)
+			//#pragma omp parallel default(none) shared(cout, wL1, wL2, this->cL1, this->cL2, HH, this->H, this->HT, iT, this->target, this->not_found, loops) num_threads(this->threads)
 			{
-				const uint32_t tid          = omp_get_thread_num();
+				const uint32_t tid          = config.nr_threads == 1 ? 0 : omp_get_thread_num();
 				const uint64_t iLThreadSize = (this->thread_size_lists2*this->thread_size_lists2) >> this->l1;
 				const uint64_t s_tid1 = tid * this->thread_size_lists1;
 				const uint64_t s_tid2 = tid * this->thread_size_lists2;
 				const uint64_t e_tid1 = ((tid == this->threads - 1) ? wL1.size() : s_tid1 + this->thread_size_lists1);
 				const uint64_t e_tid2 = ((tid == this->threads - 1) ? wL2.size() : s_tid2 + this->thread_size_lists2);
-				//std::cout << "s_tid1: " << s_tid1 << ", s_tid2: " << s_tid2 << ", e_tid1: " << e_tid1 << ", e_tid2: " << e_tid2 << "\n";
 
 				// instead of letting the list track its load, we do it.
 				uint64_t load1 = 0;
@@ -132,7 +129,7 @@ public:
 									k_lower_lvl1 = k_upper_lvl2,
 									k_upper_lvl1 = config.n - config.k;
 
-				// TODO think of something smarter to add the target/iT into the list
+				// NOTE: think of something smarter to add the target/iT into the list
 				auto add_target = [](DecodingList &L, const LabelContainerType &target) {
 					for (size_t i = 0; i < L.size(); i++){
 						LabelContainerType::add(L.data_label(i).data(), L.data_label(i).data(), target, n-k-l, n-k);
@@ -173,13 +170,13 @@ public:
 						for (i_max = i + 1; i_max < e_tid1 && wL1[i].is_equal(wL1[i_max], k_lower_lvl2, k_upper_lvl2); i_max++) {}
 						for (j_max = j + 1; j_max < e_tid2 && wL2[j].is_equal(wL2[j_max], k_lower_lvl2, k_upper_lvl2); j_max++) {}
 
-						int jprev = j;
+						size_t jprev = j;
 
 						for (; i < i_max; ++i) {
 							for (j = jprev; j < j_max; ++j) {
 								iL.add_and_append(wL1[i], wL2[j], load1, tid);
 
-								// TODO this is awekward. Somehoe we find colums in the matrix which are the same
+								// NOTE: BUG: i think at least. Somhow we find duplicated in the lists
 								if constexpr(p == 1) {
 									if (unlikely(iL[load1 - 1].is_zero())) {
 										load1 -= 1;
@@ -199,7 +196,7 @@ public:
 				OMP_BARRIER
 				i = s_tid1; j = s_tid2;
 
-				add_target(wL2, this->target);
+				add_target(wL2, this->target.data());
 				wL2.sort_level(k_lower_lvl2, k_upper_lvl2, tid);
 
 				while (i < e_tid1 && j < e_tid2) {
@@ -220,20 +217,16 @@ public:
 							for (j = jprev; j < j_max; ++j) {
 								ElementType::add(tmpe, wL1[i], wL2[j]);
 								std::pair<size_t, size_t> boundaries = iL.search_boundaries(tmpe, k_lower_lvl1, k_upper_lvl1, tid);
-								// std::cout << "boundaries: " << boundaries.first << " " << boundaries.second << "\n";
+								// std::cout << "boundaries: " << boundaries.first
+								//           << " " << boundaries.second << "\n";
 
 								// finished or nothing found?
 								if (boundaries.first == boundaries.second) {
 									continue;
 								}
 
-								//std::cout << tmpe;
-								//iL.print(boundaries.first, boundaries.second);
-
 								for (size_t t = boundaries.first; t < boundaries.second; ++t) {
 									uint32_t weight = LabelContainerType::add_weight(tmpl, tmpe.get_label_container(), iL[t].get_label_container());
-
-									//std::cout << tmpl << "\n";
 
 									if (weight <= config.weight_threshhold) {
 										check_final_list(tmpe, iL[t], tid);
@@ -243,11 +236,32 @@ public:
 						}
 					}
 				}
+			}// end pragma imp parallel
+
+
+			// print onetime information
+			if (unlikely(this->loops == 0)) {
+				this->info();
 			}
-		} // end pragma imp parallel
+
+			// print periodic information
+			if (unlikely((this->loops % config.print_loops) == 0)) {
+				this->periodic_info();
+			}
+
+			// check if another thread found the solution already.
+			OUTER_MULTITHREADED_WRITE(
+			if ((unlikely(loops % config.exit_loops) == 0)) {
+				if (finished.load()) {
+					return loops;
+				}
+			})
+
+			this->loops += 1;
+		} // end not found loop
 
 
-		return loops;
+		return this->loops;
 	}
 };
 

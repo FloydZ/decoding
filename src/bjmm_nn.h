@@ -84,13 +84,8 @@ public:
 	constexpr static ConfigParallelBucketSort chm2{b20, b21, b22, config.size_bucket2, uint64_t(1) << config.number_bucket2, threads, 2, n - k - l1 - IM_nr_views*l2, l /*TODO why not l2?*/, 0, 0};
 
 
-	// TODO use the more generic approach oneday
-	template<const uint32_t l, const uint32_t h>
-	static ArgumentLimbType Hash(uint64_t a) {
-		return 0;
-	}
-	using HM1Type  = ParallelBucketSort<chm1,  DecodingList, ArgumentLimbType, IndexType, &Hash<b10, b11>>;
-	using HM2Type = ParallelBucketSort<chm2, DecodingList, ArgumentLimbType, IndexType, &Hash<b20, b21>>;
+	using HM1Type  = ParallelBucketSort<chm1,  DecodingList, ArgumentLimbType, IndexType, &BJMM<config>::template Hash<b10, b11>>;
+	using HM2Type = ParallelBucketSort<chm2, DecodingList, ArgumentLimbType, IndexType, &BJMM<config>::template Hash<b20, b21>>;
 	HM1Type *hm11;
 	HM2Type *hm22[IM_nr_views];
 
@@ -126,13 +121,12 @@ public:
 	}
 
 	BJMMNN(mzd_t *e, const mzd_t *const s, const mzd_t *const A, const uint32_t ext_tid = 0)
-			: BJMM<config>(e, s, A, ext_tid, false) {
+		noexcept : BJMM<config>(e, s, A, ext_tid, false) {
 		ASSERT(config.nr_threads == 1);
 		ASSERT(ext_tid == 0);
 		static_assert(l == l1);
 		static_assert(IM_nr_views > 0);
 		static_assert(IM_nr_views * l2 <= 64);
-		//static_assert((n-k) % 32 != 0); // BUG
 
 		print();
 
@@ -142,14 +136,14 @@ public:
 		}
 	};
 
-	~BJMMNN() {
+	~BJMMNN() noexcept {
 		delete hm11;
 		for (unsigned int i = 0; i < IM_nr_views; ++i) {
 			delete hm22[i];
 		}
 	}
 
-	uint64_t run() {
+	uint64_t run() noexcept {
 		if constexpr(config.c == 0) {
 			return BJMMNNF();
 		} else {
@@ -162,7 +156,7 @@ public:
 	/// \param b0 	start value
 	/// \param b1 	end value
 	/// \return		true if [b0, b1] is not zero, else false.
-	bool check_for_zero_window(const LabelContainerType &l, const uint32_t b0, const uint32_t b1) {
+	bool check_for_zero_window(const LabelContainerType &l, const uint32_t b0, const uint32_t b1) noexcept {
 		ASSERT(b0 < b1);
 
 		const uint32_t pos1 = b0 / lVCLTBits;
@@ -185,7 +179,7 @@ public:
 	/// \param v3 label
 	/// \param v1 intermediate target/target
 	/// \return l1+nr_views*l2 bits
-	inline ArgumentLimbType add_bjmm(ValueContainerLimbType *v3, ValueContainerLimbType const *v1) {
+	inline ArgumentLimbType add_bjmm(ValueContainerLimbType *v3, ValueContainerLimbType const *v1) noexcept {
 		constexpr static ValueContainerLimbType mask = nkl % lVCLTBits == 0 ? ValueContainerLimbType(-1) : ~((ValueContainerLimbType(1) << (nkl % lVCLTBits)) - 1);
 		ArgumentLimbType ret;
 		if constexpr ((nkl / lVCLTBits) == ((n - k - 1) / lVCLTBits)) {
@@ -194,11 +188,11 @@ public:
 		} else {
 			v3[loffset]   ^= (v1[loffset] & mask);
 			v3[loffset+1] ^=  v1[loffset+1];
-//			// NOTE this must be generalised to 2*ValueContainerLimbType, if you want to be able to use l > 64
+			// NOTE this must be generalised to 2*ValueContainerLimbType, if you want to be able to use l > 64
 			__uint128_t data = v3[loffset];
 			data            += (__uint128_t(v3[loffset+1]) << 64);
 
-//			__uint128_t data = ((__uint128_t *)v3)[loffset];
+			//__uint128_t data = ((__uint128_t *)v3)[loffset];
 			ret = data >> lshift;  // IMPORTANT AUTO CAST HERE
 		}
 
@@ -208,7 +202,7 @@ public:
 	}
 
 	// only extract
-	inline ArgumentLimbType add_bjmm_oe(ValueContainerLimbType *v3) {
+	inline ArgumentLimbType add_bjmm_oe(ValueContainerLimbType *v3) noexcept {
 		ArgumentLimbType ret;
 		if constexpr ((nkl / lVCLTBits) == ((n - k - 1) / lVCLTBits)) {
 			// if the two limits are in the same limb
@@ -232,7 +226,7 @@ public:
 
 
 	//
-	constexpr static inline ArgumentLimbType IM_Filter(const ArgumentLimbType in, const uint16_t i) {
+	constexpr static inline ArgumentLimbType IM_Filter(const ArgumentLimbType in, const uint16_t i) noexcept {
 		// otherwise, makes the -1 no sense.
 		ASSERT(i >= 1);
 		constexpr ArgumentLimbType IM_l1_FilterMask = (ArgumentLimbType(1) << l1) - 1;
@@ -242,7 +236,7 @@ public:
 		return tmp2;
 	}
 
-	uint64_t BJMMNNF_Outer () {
+	uint64_t BJMMNNF_Outer() noexcept {
 		uint64_t loops = 0;
 		uint64_t outer_loops = 0;
 		while (this->not_found) {
@@ -273,7 +267,7 @@ public:
 		return loops;
 	}
 
-	uint64_t BJMMNNF() {
+	uint64_t BJMMNNF() noexcept {
 		uint64_t loops = 0;
 		while (this->not_found && loops < config.loops MULTITHREADED_WRITE(&& !finished.load())) {
 			restart:
@@ -289,21 +283,25 @@ public:
 			mzd_submatrix(this->H, this->work_matrix_H, config.TrivialAppendRows, n - k - l, n - k, n - c + this->DOOM_nr);
 			matrix_transpose(this->HT, this->H);
 
+			// helper structure only needed for debugging
 			Matrix_T<mzd_t *> HH((mzd_t *) this->H);
-			if constexpr(!config.DOOM) {
-				this->target.column_from_m4ri(this->work_matrix_H, n - c);
 
+			// choose random intermediate target
+			this->iT1 = fastrandombits<ArgumentLimbType, l>();
+
+			if constexpr(!config.DOOM) {
+				this->target.data().column_from_m4ri(this->work_matrix_H, n - c);
+				this->iTarget = this->extractor(this->target) ^ this->iT1;
+
+				// check if the target has a zero window in one of the l2 NN
+				// windows.
 				for (uint32_t i = 0; i < IM_nr_views; i++) {
-					if (check_for_zero_window(this->target, l1 + i*l2, l1 + (i+1)*l2) == 0) {
+					if (check_for_zero_window(this->target.data(), l1 + i*l2, l1 + (i+1)*l2) == 0) {
 						//std::cout << this->target << " target\n";
 						goto restart;
 					}
 				}
 			}
-
-
-			// choose random intermediate target
-			this->iT1.random();
 
 			// TODO Parallelize
 			{
@@ -338,11 +336,10 @@ public:
 				OMP_BARRIER
 
 				for (; npos[1] < e_tid; ++npos[1], Lptr += this->llimbs_a) {
-					if constexpr(config.DOOM) {
-						data = this->add_bjmm_oe(Lptr);
-					} else {
-						data = this->add_bjmm(Lptr, this->iT1.ptr());
-					}
+					data = this->extractor_ptr(Lptr);
+					ASSERT((this->hm1->check_label(data, this->L2, npos[1])));
+					data ^= this->iT1;
+
 					pos1 = hm11->find(data, load1);
 
 					while (pos1 < load1) {
@@ -385,7 +382,7 @@ public:
 					if constexpr(!config.DOOM) {
 						label.zero();
 						LabelContainerType::add(label, label, this->L2.data_label(npos[3]).data());
-						LabelContainerType::add(label, label, this->target, 0, nkl);
+						LabelContainerType::add(label, label, this->target.data(), 0, nkl);
 					}
 
 					pos1 = hm11->find(data, load1);
@@ -429,14 +426,14 @@ public:
 								uint32_t weight;
 								if constexpr(!config.DOOM) {
 									weight = LabelContainerType::template add_only_upper_weight_partly_withoutasm<lupper, lumask>(label3, label3, label2);
-//									std::cout << label3 << " label3\n";
-//									std::cout << this->target << " this->target\n";
-//									std::cout << this->L1.data_label(npos[0]).data() << " npos[0]:" << npos[0] << "\n";
-//									std::cout << this->L2.data_label(npos[1]).data() << " npos[1]:" << npos[1] << "\n";
-//									std::cout << this->L1.data_label(npos[2]).data() << " npos[2]:" << npos[2] << "\n";
-//									std::cout << this->L2.data_label(npos[3]).data() << " npos[3]:" << npos[3] << "\n";
-//									std::cout << label2 << " label2\n";
-//									std::cout << label3 << " label3\n";
+									//	std::cout << label3 << " label3\n";
+									//	std::cout << this->target << " this->target\n";
+									//	std::cout << this->L1.data_label(npos[0]).data() << " npos[0]:" << npos[0] << "\n";
+									//	std::cout << this->L2.data_label(npos[1]).data() << " npos[1]:" << npos[1] << "\n";
+									//	std::cout << this->L1.data_label(npos[2]).data() << " npos[2]:" << npos[2] << "\n";
+									//	std::cout << this->L2.data_label(npos[3]).data() << " npos[3]:" << npos[3] << "\n";
+									//	std::cout << label2 << " label2\n";
+									//	std::cout << label3 << " label3\n";
 
 								} else {
 									weight = LabelContainerType::add_weight(label3.data().data(), label3.data().data(),label2.data().data());
@@ -451,16 +448,18 @@ public:
 						}
 					}
 				}
+			} // parallel section
 
-				// print final loop information.
-				print_info(loops);
-
-				// if another thread found the solutionquir
-				OUTER_MULTITHREADED_WRITE(
-				if (finished.load()) {
-						return loops;
-				})
+			// print final loop information.
+			if ((loops % config.print_loops) == 0) {
+				this->periodic_info();
 			}
+
+			// if another thread found the solutionquir
+			OUTER_MULTITHREADED_WRITE(
+				if (finished.load()) {
+					return loops;
+				})
 
 			loops += 1;
 		}
@@ -474,29 +473,6 @@ public:
 		double offset_loops = (double(loops) / double(this->Loops())) * double(100);
 		std::cout << "loops/expected: " << loops << "/" << this->Loops() << " " << offset_loops << "%\n" << std::flush;
 		return loops;
-	}
-
-
-	/// prints current loops information like: Hasmap usage,..
-	/// \param loops
-	void print_info(uint64_t loops) {
-#ifndef NO_LOGGING
-		if ((loops % config.print_loops) == 0) {
-			std::cout << "BJMMF: tid:" << omp_get_thread_num() << ", loops: " << loops << "\n";
-			std::cout << "log(inner_loops): " << this->LogLoops(n, c) << ", inner_loops: " << this->Loops(n, c) ;
-			if constexpr(c != 0) {
-				std::cout << ", log(outer_loops): " << this->LogOuterLoops(n, c) << ", outer_loops: " << this->OuterLoops(n, c) ;
-			}
-			std::cout << "\n";
-#ifndef CHALLENGE
-			hm11->print();
-			for(unsigned int i = 0; i < IM_nr_views; i++){
-				hm22[i]->print();
-			}
-			std::cout << "\n";
-#endif
-		}
-#endif
 	}
 };
 

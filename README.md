@@ -83,6 +83,13 @@ The following commands where used for the high memory benchmark. Note: most of t
 ```bash
 python3 gen.py -n1223 -l49 -l1 24 -p 3 --hm1_bucketsize 24 --hm2_bucketsize 25 --hm1_nrbuckets 4 --hm2_nrbuckets 4 --threads 2 --outer_threads 1 --bjmm_special_alignment --force_huge_page --seconds 600 --benchmark
 python3 gen.py -n1284 -l49 -l1 25 -p 3 --hm1_bucketsize 25 --hm2_bucketsize 24 --hm1_nrbuckets 4 --hm2_nrbuckets 4 --threads 2 --outer_threads 1 --bjmm_special_alignment --force_huge_page --seconds 600 --benchmark
+python3 gen.py -n1409 -l50 -l1 25 -p 3 --hm1_bucketsize 25 --hm2_bucketsize 25 --hm1_nrbuckets 1 --hm2_nrbuckets 1 --threads 2 --outer_threads 1 --force_huge_page --seconds 600 --benchmark 
+python3 gen.py -n1473 -l51 -l1 25 -p 3 --hm1_bucketsize 25 --hm2_bucketsize 26 --hm1_nrbuckets 1 --hm2_nrbuckets 1 --threads 2 --outer_threads 1 --force_huge_page --seconds 600 --benchmark
+python3 gen.py -n1536 -l51 -l1 25 -p 3 --hm1_bucketsize 25 --hm2_bucketsize 26 --hm1_nrbuckets 1 --hm2_nrbuckets 1 --threads 2 --outer_threads 1 --force_huge_page --seconds 600 --benchmark
+python3 gen.py -n1600 -l52 -l1 25 -p 3 --hm1_bucketsize 25 --hm2_bucketsize 27 --hm1_nrbuckets 1 --hm2_nrbuckets 1 --threads 2 --outer_threads 1 --force_huge_page --seconds 600 --benchmark
+python3 gen.py -n1665 -l52 -l1 25 -p 3 --hm1_bucketsize 25 --hm2_bucketsize 27 --hm1_nrbuckets 1 --hm2_nrbuckets 1 --threads 2 --outer_threads 1 --force_huge_page --seconds 600 --benchmark
+python3 gen.py -n1730 -l52 -l1 25 -p 3 --hm1_bucketsize 25 --hm2_bucketsize 27 --hm1_nrbuckets 1 --hm2_nrbuckets 1 --threads 2 --outer_threads 1 --force_huge_page --seconds 600 --benchmark
+python3 gen.py -n1796 -l52 -l1 25 -p 3 --hm1_bucketsize 25 --hm2_bucketsize 27 --hm1_nrbuckets 1 --hm2_nrbuckets 1 --threads 2 --outer_threads 1 --force_huge_page --seconds 600 --benchmark
 ```
 It can be faster for your system to include `--force_huge_page` and `--force_container_alignment`. In general you need to play a little with the flags, to get the best results.
 
@@ -258,3 +265,21 @@ python3 --bench
 python3 --optimize
 python3 --calc_loops
 ```
+
+Core Binding
+----
+Either via
+    - `sudo taskset -c 1 ./main`
+or 
+    - `OMP_PLACES=cores OMP_PROC_BIND=close ./main`, `OMP_PLACES=cores OMP_PROC_BIND=spread ./main`
+or 
+    - `for j in {0..127}; do sudo taskset -c ${j} ./main & done`
+
+Polly/Bolt
+---
+cmake -DCMAKE_BUILD_TYPE=Release -D CMAKE_CXX_COMPILER=~/Downloads/BOLT/build_server1/bin/clang++  -DCMAKE_LINKER=clang++-14 -DCMAKE_CXX_LINK_EXECUTABLE="<CMAKE_LINKER> <FLAGS> <CMAKE_CXX_LINK_FLAGS> <LINK_FLAGS> <OBJECTS> -o <TARGET> <LINK_LIBRARIES>"  ..
+~/Downloads/BOLT/build_server1/bin/llvm-bolt main_bolt -instrument -jump-tables=move -o main_bolt_out -align-macro-fusion=all
+~/Downloads/BOLT/build_server1/bin/llvm-bolt main_bolt -o main_bolt.bolt -data=/tmp/prof.fdata -reorder-blocks=cache+ -reorder-functions=hfsort -split-functions=2 -split-all-cold -split-eh -dyno-stats
+
+
+~/Downloads/BOLT/build_server1/bin/llvm-bolt main_bolt -o main_bolt.bolt -data=/tmp/prof.fdata -reorder-blocks=cache+ -reorder-functions=hfsort -split-functions=2 -split-all-cold -split-eh -dyno-stats -jump-tables=move -align-macro-fusion=all --simplify-conditional-tail-calls --peepholes=all --hugify  --icp-eliminate-loads  --icf

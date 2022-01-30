@@ -159,9 +159,54 @@ def calc(file: str, time=600, single_tree=False, lessout=False):
         return [parse_n(file), parse_p(file), lph, pre, time, loops, file]
 
 
+def mo_calc(file):
+    with open(file, 'r') as f:
+        lines = list(f.readlines())
+        revlines = list(reversed(lines))
+
+        # first calc the delay
+        #firstregex = "Time: (\d+.\d+), clock Time: (\d+.\d+), lps: 0"
+        firstregex = "Init took: (\d+.\d+) s"
+        firstregexdata = []
+        for line in lines:
+            data = re.findall(firstregex, line)
+            if data:
+                firstregexdata.append(float(data[0]))
+
+
+        secregex = "currently at 0 loops, (\d+.\d+)s, 0lps"
+        secregexdata = []
+        for line in lines:
+            data = re.findall(secregex, line)
+            if data:
+                secregexdata.append(float(data[0]))
+
+        thregex = "currently at (\d+) .*"
+        thregexdata = []
+        for line in revlines[:128]:
+            data = re.findall(thregex, line)
+            if data:
+                thregexdata.append(float(data[0]))
+
+        threads = 128
+        seconds = 600
+        offset1 = sum(firstregexdata)/len(firstregexdata)
+        offset2 = sum(secregexdata)/len(secregexdata)
+        loops = sum(thregexdata)/len(thregexdata)
+        offset1 = seconds/(seconds-offset1/threads)
+        offset2 = seconds/(seconds-offset2/threads)
+
+        print(loops)
+        print("RealLoops:", loops*offset1, offset1)
+        print("RealLoops:", (loops-1)*offset2, offset2)
+
 def main(argv):
     if len(argv) < 2:
         return
+    if isfile(argv[1]):
+        return mo_calc(argv[1])
+    return
+
 
     if isfile(argv[1]):
         return calc(argv[1])

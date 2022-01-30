@@ -1,36 +1,61 @@
 #ifndef SMALLSECRETLWE_PRANGE_H
 #define SMALLSECRETLWE_PRANGE_H
 
-#include "decoding.h"
+#include "leebrickell.h"
 
-// IMPORTANT: Due to implementation difficulties i have to rename the input parameters
+// IMPORTANT: Due to implementation difficulties I have to rename the input parameters
 //  n=#cols
 //  k=#rows AND NOT n-k=#rows
 struct ConfigPrange {
+private:
+	// Disable the empty constructor.
+	constexpr ConfigPrange() : n(0), k(0), w(0), max_iters(0), m4ri_k(0), syndrom_col(0) {}
+
 public:
-	const uint32_t n, k, w;
+	// instance parameter:
+	const uint32_t  n, // code length
+	                k, // code dimension
+	                w; // weight
+	// stop the algorithm after this amount of iterations, even the solution was not found.
+	// Useful if you want to use Prange as a subroutine in some other algorithm
 	const uint64_t max_iters;
+
+	// do not change. optimal r parameter for the `method of the 4 russians` algorithm
 	const int m4ri_k;
+
+	// exact column within the parity check matrix where the syndrome is written int. Useful if you want to exploit alignment stuff.
 	const uint32_t syndrom_col;
-	constexpr ConfigPrange(uint32_t n, uint32_t k, uint32_t w, uint32_t syndrom_col, uint64_t max_iters=0) :
-			n(n), k(k), w(w), syndrom_col(syndrom_col), max_iters(max_iters == 0 ? bc(n, w)/bc(k, w) : max_iters),
-			m4ri_k(matrix_opt_k(k, n)) {}
+
+	constexpr ConfigPrange(const uint32_t n,
+	                       const uint32_t k,
+	                       const uint32_t w,
+	                       const uint32_t syndrom_col,
+	                       const uint64_t max_iters=0) :
+			n(n),
+	        k(k),
+	        w(w),
+	        max_iters(max_iters == 0 ? bc(n, w)/bc(k, w) : max_iters),
+	        m4ri_k(matrix_opt_k(k, n)),
+			syndrom_col(syndrom_col)
+		{}
 };
 
-/// TODO describe
+/// pass the struct to the algorithm to collect runtime performance information.
 struct PerformancePrange {
 public:
 	uint64_t loops = 0;
 
-	// Simple gives a little bit of output
-	void print() {
+	// prints some runtime/performance informations
+	void print() noexcept {
 		std::cout << "Prange Loops: " << loops << "\n" << std::flush;
 	}
 
-	void reset() {
+	// resets all runtime/performance counters
+	constexpr void reset() noexcept {
 		loops = 0;
 	}
 
+	// prints the expected number of loops
 	void expected(const ConfigPrange &config) {
 		uint64_t expected_loops = bc(config.n, config.w)/bc(config.k, config.w);
 		std::cout << "Prange Loops/Expected: " << loops << "/" << expected_loops << "\n" << std::flush;
@@ -40,7 +65,7 @@ public:
 /// Metaprogramming test:
 template<const ConfigPrange &config>
 struct prange_thread_single {
-	template<int index>
+	template<uint32_t index>
 	static int func(mzd_t *e, mzd_t *work_matrix_H, mzd_t *work_matrix_H_T, mzp_t *P_C,
 				    customMatrixData *matrix_data) {
 		int ret = 0;
@@ -68,7 +93,7 @@ struct prange_thread_single {
                     }
 
                     if (mzd_read_bit(work_matrix_H, i, b)) {
-                        // config.syndrom_col+1 descibes the end col.
+                        // config.syndrom_col+1 describes the end col.
                         mzd_row_xor_unroll<config.syndrom_col+1>(work_matrix_H, i, b);
                     }
                 }
@@ -92,16 +117,17 @@ struct prange_thread_single {
 /// IMPORTANT: Does not alloc nor free any memory
 /// \tparam config
 /// \param e 					return parameter: Is set to the error if a solution is found.
-/// \param working_s			tmp parameter will be overwritten
-/// \param working_s_T			tmp parameter will be overwritten
-/// \param work_matrix_H		syndrom is the las column
-/// \param work_matrix_H_T
-/// \param P_C
-/// \return
+/// \param working_s			tmp parameter will be overwritten: Syndrome
+/// \param working_s_T			tmp parameter will be overwritten: Syndrome transposed
+/// \param work_matrix_H		syndrome is the last column
+/// \param work_matrix_H_T		tmp parameter, will be overwritten. Used to store the transposed of: `work_matrix_H`
+/// \param P_C					tmp parameter, will be overwritten. Used to store the new permutation.
+/// \return 0: nothing found
+/// 		1: solution found
 template<const ConfigPrange &config>
-uint64_t prange_thread(mzd_t *e,
+uint32_t prange_thread(mzd_t *e,
                   mzd_t *work_matrix_H, mzd_t *work_matrix_H_T,  mzp_t *P_C,
-                  customMatrixData *matrix_data, PerformancePrange *perf) {
+                  customMatrixData *matrix_data, PerformancePrange *perf) noexcept {
 	// Extract parameters.
 	constexpr uint32_t n = config.n;    // #cols
 	constexpr uint32_t k = config.k;    // #nrows IMPORTANT #rows IS NOT n-k
@@ -163,6 +189,7 @@ uint64_t prange_thread(mzd_t *e,
 			return 1;
 		}
 
+		// periodically prints some information
 		if ((loops % 100000) == 0) {
 			std::cout << "Loops: " << loops << "\n";
 		}
@@ -172,15 +199,15 @@ uint64_t prange_thread(mzd_t *e,
 	return 0;
 }
 
-///
-/// \tparam config
-/// \param e
-/// \param s
-/// \param A
-/// \param perf
-/// \return
+/// \tparam config, contains instance paramters, and some desciption of the algorithm.
+/// \param e	output: error vector = solution
+/// \param s	input the syndrome to match on
+/// \param A	input: parity check matrix
+/// \param perf	input: 	nullptr: nothing happens
+///						struct: on return, this struct contains runtime/performance information about the algorithm.
+/// \return #loops needed to find the solution
 template<const ConfigPrange &config>
-uint64_t prange(mzd_t *e, const mzd_t *const s, const mzd_t *const A, PerformancePrange *perf=nullptr) {
+uint64_t prange(mzd_t *e, const mzd_t *const s, const mzd_t *const A, PerformancePrange *perf=nullptr) noexcept {
 	// Extract parameters.
 	constexpr uint32_t n = config.n;    // #cols
 	constexpr uint32_t k = config.k;    // #nrows IMPORTANT #rows IS NOT n-k

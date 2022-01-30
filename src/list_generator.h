@@ -151,14 +151,15 @@ void generate_decoding_lists(DecodingList &l1, DecodingList &l2, std::vector<std
 // the last part can be empty.
 // the binary flag indicates if the succumb data container are binary or k_ary.
 // IMPORTANT: this function only prepares the values of each element. It does not calculate the label.
+template<typename DecodingList>
 void prepare_generate_base_mitm(DecodingList &L,
 								std::vector<std::pair<uint64_t, uint64_t>> &diff_list,
                                 const uint64_t l1, const uint64_t l2,
                                 const uint64_t w1, const uint64_t w2,
                                 const bool binary=true) {
 	ASSERT(w1 < l1 && w2 < l2 && 0 < w1 && 0 < w2);
-	using Element               = DecodingList::ElementType;
-	using ValueContainerLimbType= DecodingList::ValueContainerType::ContainerLimbType;
+	using Element               = typename DecodingList::ElementType;
+	using ValueContainerLimbType= typename DecodingList::ValueContainerType::ContainerLimbType;
 	using VCLT = ValueContainerLimbType;
 
 	uint16_t pos1, pos2;

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.12)
+cmake_minimum_required(VERSION 3.20.1)
 project(decoding)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_C_STANDARD 11)
@@ -38,7 +38,7 @@ ExternalProject_Add(cryptanalysislib_project
 set(VALUE_FLAG "")
 
 
-# two possible options. 'tcmalloc' is the standard google malloc implementation
+
 #set(MALLOC_LIBRARY tcmalloc)
 set(MALLOC_LIBRARY "")
 
@@ -49,10 +49,10 @@ set(SANITIZE_FLAG "")
 #set(ADDITIONAL_FLAGS "-DUSE_AVX2  -fno-inline")
 set(ADDITIONAL_FLAGS "-DUSE_AVX2")
 
-set(ALLOWED_WARNINGS " -Wno-unused-function -Wno-unused-local-typedef -Wno-overlength-strings -Wno-unknown-pragmas")
+set(ALLOWED_WARNINGS " -Wno-unused-function -Wno-unused-local-typedef -Wno-overlength-strings -Wno-unknown-pragmas -Wno-unused-variable")
 
 set(DEBUG_FLAGS "-DDEBUG -Wall -Wpedantic -pedantic -march=native ${ALLOWED_WARNINGS} ${VALUE_FLAG} ${SANITIZE_FLAG} ${ADDITIONAL_FLAGS}")
-set(OPTIMIZE_FLAGS "-Ofast -ffast-math -ftree-vectorize -funroll-loops -Wall -Wpedantic -pedantic -march=native -flto -fwrapv -fomit-frame-pointer ${ALLOWED_WARNINGS} ${VALUE_FLAG} ${SANITIZE_FLAG} ${ADDITIONAL_FLAGS}")
+set(OPTIMIZE_FLAGS "-Ofast -ffast-math -ftree-vectorize -funroll-loops -Wall -Wpedantic -pedantic -march=native -flto -fwrapv -fomit-frame-pointer -fno-exceptions ${ALLOWED_WARNINGS} ${VALUE_FLAG} ${SANITIZE_FLAG} ${ADDITIONAL_FLAGS}")
 #set(OPTIMIZE_FLAGS "-march=native -O3 -flto -DNDEBUG ${VALUE_FLAG}")
 set(SANITIZER_FLAGS -fsanitize=address -fno-omit-frame-pointer)
 set(GCC_HELPER_FLAGS -fvar-tracking-assignments)
@@ -110,17 +110,30 @@ set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} ${DEBUG_FLAGS}")
 set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} ${OPTIMIZE_FLAGS}")
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} ${OPTIMIZE_FLAGS}")
 
-# include cuda if possible
-#set(USE_CUDA "1")
+
+#TODO include cuda if possible
+set(USE_CUDA "1")
 if(USE_CUDA)
         enable_language(CUDA)
+
+        #ExternalProject_Add(nvbench_project
+        #        SOURCE_DIR        ${CMAKE_SOURCE_DIR}/deps/nvbench
+        #        CONFIGURE_COMMAND cd <SOURCE_DIR> && git checkout ff50759 && mkdir -p build
+        #        COMMAND           cd <SOURCE_DIR> && cd build/ && cmake -DCMAKE_CUDA_ARCHITECTURES=60 -DCUDA_ARCHITECTURES=60-real -DNVBench_ENABLE_CUPTI=ON ..
+        #        BUILD_COMMAND     cd <SOURCE_DIR> && cd build/ && make -j8
+        #        INSTALL_COMMAND   ""
+        #        TEST_COMMAND      ""
+        #        )
 
         # global include path for dependencies
         # maybe a little ugly, but the easiest way to include `cuda_runtime.h`
         # as far as i know this is only needed for arch linux.
         include_directories(/opt/cuda/samples/common/inc)
         include_directories(/opt/cuda/include)
-        include_directories("deps/cudacommon")
+        include_directories(deps/cudacommon)
+        include_directories(deps/cuCollections/include)
+        # cannot be included in general, because this some how added automatically a second main function
+        # include_directories(deps/nvbench)
 
         #for ubuntu
         include_directories(/usr/local/cuda/samples/common/inc)
@@ -133,10 +146,12 @@ if(USE_CUDA)
 
 
         # fall back, if one does not directly have a CUDA rdy card, but rather a optimus (internal laptop) card.
-        if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+        #if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
                 set(CMAKE_CUDA_ARCHITECTURES 61)
-        endif()
+        #endif()
 
+        # this is needed to get the libary created
+        #add_subdirectory(deps/nvbench)
         #add_executable(test_cuda tests/test_cuda.cu)
         #target_link_libraries(test_cuda ${LINK_TEST_FLAGS} fplll m4ri gmpxx gmp)
 endif()
@@ -181,7 +196,7 @@ target_compile_options(main_profile2 PUBLIC -fprofile-use -fprofile-correction -
 target_link_libraries(main_profile2 ${LINK_TEST_FLAGS})
 add_dependencies(main_profile2 LLVM_PROFDATA)
 
-if (CMAKE_CXX_COMPILER_ID STREQUAL "clang")
+#if (CMAKE_CXX_COMPILER_ID STREQUAL "clang")
         add_executable(main_PGO_instrumentation_first main.cpp)
         target_compile_options(main_PGO_instrumentation_first PUBLIC -fprofile-instr-generate -DUSE_LOOPS=2)
         target_link_libraries(main_PGO_instrumentation_first ${LINK_TEST_FLAGS} -fprofile-instr-generate)
@@ -191,4 +206,13 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "clang")
         target_compile_options(main_PGO_instrumentation_second PUBLIC -fprofile-instr-use=code.profdata -DCHALLENGE)
         target_link_libraries(main_PGO_instrumentation_second ${LINK_TEST_FLAGS} -fprofile-instr-use=${CMAKE_SOURCE_DIR}/cmake-build-release/code.profdata)
         #target_link_options(main_PGO_instrumentation_second PUBLIC -fprofile-instr-use=${CMAKE_SOURCE_DIR}/cmake-build-release/code.profdata)
-endif()
+#endif()
+
+#add_executable(main_polly main.cpp)
+#target_compile_options(main_polly PUBLIC -mllvm -polly -mllvm -polly-parallel -mllvm -polly-omp-backend=LLVM)
+#target_link_libraries(main_polly ${LINK_TEST_FLAGS})
+
+add_executable(main_bolt main.cpp)
+#target_compile_options(main_bolt PUBLIC --emit-relocs)
+target_link_libraries(main_bolt ${LINK_TEST_FLAGS})
+target_link_options(main_bolt PUBLIC -Xlinker --emit-relocs)
