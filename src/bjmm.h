@@ -1208,7 +1208,6 @@ public:
 				std::cout << "weight input: " << weight << "\n";
 				std::cout << "hashmap " << DOOM_index2 << " found\n";
 
-				std::cout << iT1 << " iT\n";
 				std::cout << target << " target\n";
 				std::cout << label << " label\n";
 				std::cout << L1.data_label(npos[0]).data() << " npos[0]:" << npos[0] << "\n";
@@ -1736,7 +1735,7 @@ public:
 
 											LabelContainerType::add(label3, L2.data_label(npos[1]).data(), L1.data_label(npos[0]).data());
 											LabelContainerType::add(label2, L2.data_label(npos[3]).data(), L1.data_label(npos[2]).data());
-											LabelContainerType::add(label2, label2, target);
+											LabelContainerType::add(label2, label2, target.data());
 										}
 
 										if constexpr (!config.HM1_SAVE_FULL_128BIT_SWITCH) {
@@ -1749,7 +1748,7 @@ public:
 											weight = LabelContainerType::template add_only_upper_weight_partly_withoutasm<lupper, lumask>(label3, label3, label2);
 
 											LabelContainerType ltmp;
-											LabelContainerType::add(ltmp, label3, target);
+											LabelContainerType::add(ltmp, label3, target.data());
 											for (uint32_t i = n-config.k-l; i < n-config.k; ++i) {
 												if ((label3[i] != 0 ) && (ltmp[i] != 0)) {
 													std::cout << target << " target\n";

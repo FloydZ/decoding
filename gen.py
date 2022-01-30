@@ -435,8 +435,6 @@ def write_config(args, CODE_TARGET="mceliece", bench=False):
 #include "helper.h"
 #include "matrix.h"
 #include "bjmm.h"
-#include "mo.h"
-#include "ternary.h"
 """)
         f.write("#endif //SSLWE_CONFIG_SET")
 
