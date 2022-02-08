@@ -18,8 +18,13 @@ except:
 from math import log2,inf
 from math import *
 
-from cleanup import *
-import estimate
+try:
+    from .cleanup import *
+    from .estimate import *
+except:
+    import cleanup
+    import estimate
+
 
 # log_2(binom(n, k))
 def loc(n: int, k: int):
@@ -80,6 +85,15 @@ def get_log_file(args):
 
     if args.mo:
         s += "_mohm" + str(args.mo_hm) + "_mol2" + str(args.mo_l2)
+
+    if args.eb:
+        s += "_eb_p1" + str(args.eb_p1) + "_eb_p2" + str(args.eb_p1)
+
+    if args.prange:
+        s += "_prange"
+
+    if args.dumer:
+        s += "_dumer"
 
     return s + "_" + CODE_TARGET + ".log"
 
@@ -296,11 +310,26 @@ def write_config(args, CODE_TARGET="mceliece", bench=False):
     # choose between the two NN options. First our streaming method denoted with `NN`
     NN = 0  # for now deactivated, because its not fast enough
 
-    # or secondly our MayOzerov implementation
+    # or secondly our May Ozerov implementation
     if args.mo:
         MO = "1"
     else:
         MO = "0"
+
+    if args.eb:
+        BE = "1"
+    else:
+        BE = "0"
+
+    if args.prange:
+        PRANGE = "1"
+    else:
+        PRANGE = "0"
+
+    if args.dumer:
+        DUMER = "1"
+    else:
+        DUMER = "0"
 
     with open(CMAKE_TARGET+".h", "w") as f:
         f.write("""
@@ -341,6 +370,7 @@ def write_config(args, CODE_TARGET="mceliece", bench=False):
         f.write("constexpr double ifactor =" + str(args.ifactor) + ";\n")
         f.write("constexpr uint32_t no_values =" + str(args.no_values) + ";\n")
         f.write("constexpr uint32_t high_weight =" + str(args.high_weight) + ";\n")
+        f.write("constexpr uint32_t intermediate_target_loops =" + str(args.intermediate_target_loops) + ";\n")
 
         if bench:
             f.write("#define BENCHMARK 1\n")
@@ -361,6 +391,9 @@ def write_config(args, CODE_TARGET="mceliece", bench=False):
         f.write("#define NUMBER_OUTER_THREADS " + str(args.outer_threads) + "\n")
         f.write("#define USE_DOOM " + str(DOOM) + "\n")
         f.write("#define USE_MO " + str(MO) + "\n")
+        f.write("#define USE_BE " + str(BE) + "\n")
+        f.write("#define USE_PRANGE " + str(PRANGE) + "\n")
+        f.write("#define USE_DUMER " + str(DUMER) + "\n")
         f.write("#define USE_NN " + str(NN) + "\n")
 
         # for now permanently disabled
@@ -434,7 +467,11 @@ def write_config(args, CODE_TARGET="mceliece", bench=False):
         f.write("""
 #include "helper.h"
 #include "matrix.h"
+#include "prange.h"
+#include "dumer.h"
 #include "bjmm.h"
+#include "mo.h"
+#include "ternary.h"
 """)
         f.write("#endif //SSLWE_CONFIG_SET")
 
@@ -986,13 +1023,13 @@ def optimize_binary(args):
     n = args.params
     # note that we subtract +1 from k to simulate the parity row we added
     if CODE_TARGET == "lowweight":
-        k = ceil(0.5 * args.params) + 1
+        k = ceil(0.5 * args.params) - 1
         w = args.lowweight_w
     elif CODE_TARGET == "mceliece":
-        k = ceil(0.8 * args.params) + 1
+        k = ceil(0.8 * args.params) - 1
         w = calc_w(args.params)
     elif CODE_TARGET == "quasicyclic":
-        k = floor(0.5*n) + 1
+        k = floor(0.5*n) - 1
         w = int(sqrt(n-2))
 
     l_val, l1_val, p_val, mem = 0, 0, 0, inf
@@ -1289,6 +1326,7 @@ if __name__ == "__main__":
     parser.add_argument('--syndrom', help='attack syndrome decoding challenges.', action='store_true')
 
     parser.add_argument('--quasicyclic_force_disable_doom', help='disables doom even if QC is active.', action='store_true')
+    parser.add_argument('--intermediate_target_loops', help='disables doom even if QC is active.', default=1, type=int, required=False)
 
     parser.add_argument('-t' , '--threads', help='number of openmp the algorithm can use to parallelize the tree. -1 means all available.', default=1, type=int, required=False)
     parser.add_argument('--outer_threads', help='number of openmp threads to parallelize the permutations.', default=1, type=int, required=False)
