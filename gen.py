@@ -4,6 +4,7 @@ import json
 import os
 import random
 import string
+import pprint
 from subprocess import Popen, PIPE, STDOUT
 
 import math
@@ -15,7 +16,7 @@ try:
 except:
     pass
 
-from math import log2,inf
+from math import log2, inf
 from math import *
 
 try:
@@ -292,7 +293,7 @@ def write_config(args, CODE_TARGET="mceliece", bench=False):
     DOOM = "0"
 
     if CODE_TARGET == "quasicyclic":
-        n_file = w2file(args.param_w1)
+        n_file = w2file(args.lowweight_w)
         if not args.quasicyclic_force_disable_doom:
             DOOM = "1"
     elif CODE_TARGET == "mceliece":
@@ -341,7 +342,11 @@ def write_config(args, CODE_TARGET="mceliece", bench=False):
 
 #include "m4ri/m4ri.h"
 """)
-        f.write(n_file)
+        if args.include_file:
+            f.write("#include \"" + args.include_file + "\"")
+        else:
+            f.write(n_file)
+
         f.write("\n")
         if CODE_TARGET == "lowweight":
             f.write("constexpr uint32_t G_w = " + str(args.lowweight_w)+";\n")
@@ -457,7 +462,7 @@ def write_config(args, CODE_TARGET="mceliece", bench=False):
         if args.bjmm_special_alignment:
             f.write("""#define USE_AVX2_SPECIAL_ALIGNMENT\n""")
 
-        #ternary stuff
+        # ternary stuff
         f.write("constexpr uint32_t TERNARY_NR1=" + str(args.ternary_w1) + ";\n")
         f.write("constexpr uint32_t TERNARY_NR2=" + str(args.ternary_w2) + ";\n")
         f.write("constexpr uint32_t TERNARY_ALPHA=" + str(args.ternary_alpha) + ";\n")
@@ -470,8 +475,6 @@ def write_config(args, CODE_TARGET="mceliece", bench=False):
 #include "prange.h"
 #include "dumer.h"
 #include "bjmm.h"
-#include "mo.h"
-#include "ternary.h"
 """)
         f.write("#endif //SSLWE_CONFIG_SET")
 
@@ -1304,6 +1307,7 @@ if __name__ == "__main__":
     parser.add_argument('--target_dir', help='run target in dir', default="", type=str, required=False)
     parser.add_argument('--target_flag', help='run target with the flag', default="", type=str, required=False)
     parser.add_argument('--log_file', help='log to file', default="", type=str, required=False)
+    parser.add_argument('--include_file', help='challenge file', default="", type=str, required=False)
     parser.add_argument('--shell_logging', help='Instead of logging everything to a file, it will be shown on stdout', action='store_true')
     parser.add_argument('--no_logging', help='Disable most of the internal logging of the algorithms.', action='store_true')
     parser.add_argument('--print_loops', help='print every X loops some status information.', default=10000, type=int, required=False)
