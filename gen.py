@@ -232,7 +232,7 @@ def wait_timeout(proc, seconds):
         time.sleep(interval)
 
 
-def rebuild(path=""):
+def rebuild(path="."):
     """
     run `make` in `cmake-build-release` directory to rebuild `main.cpp`
     :return: nothing
@@ -244,7 +244,7 @@ def rebuild(path=""):
     return p.returncode
 
 
-def run(seconds=0, logging=True):
+def run(seconds=0, logging=True, path="."):
     """
     runs `./main` in `cmake-build-release`
     :param seconds: timeout seconds. After `seconds` seconds the program is killed.
@@ -260,9 +260,9 @@ def run(seconds=0, logging=True):
 
         print("opening for logging", CMAKE_LOGGING_FILE)
         f = open(CMAKE_LOGGING_FILE, "w")
-        p = Popen(["./" + CMAKE_TARGET_DIR+CMAKE_TARGET, CMAKE_TARGET_FLAG], preexec_fn=os.setsid, cwd= "./cmake-build-release", stdout=f)
+        p = Popen(["./" + CMAKE_TARGET_DIR+CMAKE_TARGET, CMAKE_TARGET_FLAG], preexec_fn=os.setsid, cwd=path+"/cmake-build-release", stdout=f)
     else:
-        p = Popen(["./" + CMAKE_TARGET_DIR+CMAKE_TARGET, CMAKE_TARGET_FLAG], preexec_fn=os.setsid, cwd= "./cmake-build-release")
+        p = Popen(["./" + CMAKE_TARGET_DIR+CMAKE_TARGET, CMAKE_TARGET_FLAG], preexec_fn=os.setsid, cwd=path+"/cmake-build-release")
     if seconds != 0:
         try:
             c = wait_timeout(p, seconds)
