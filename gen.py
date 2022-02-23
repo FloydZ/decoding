@@ -232,12 +232,12 @@ def wait_timeout(proc, seconds):
         time.sleep(interval)
 
 
-def rebuild():
+def rebuild(path=""):
     """
     run `make` in `cmake-build-release` directory to rebuild `main.cpp`
     :return: nothing
     """
-    p = Popen(["make", CMAKE_TARGET, "-j1"], stdin=PIPE, stdout=PIPE, stderr=STDOUT, close_fds=True, cwd= "./cmake-build-release")
+    p = Popen(["make", CMAKE_TARGET, "-j1"], stdin=PIPE, stdout=PIPE, stderr=STDOUT, close_fds=True, cwd=path+"/cmake-build-release")
     p.wait()
     if p.returncode != 0:
         print("ERROR Build", p.returncode, p.stdout.read().decode("utf-8"))
@@ -475,6 +475,8 @@ def write_config(args, CODE_TARGET="mceliece", bench=False):
 #include "prange.h"
 #include "dumer.h"
 #include "bjmm.h"
+#include "mo.h"
+#include "ternary.h"
 """)
         f.write("#endif //SSLWE_CONFIG_SET")
 
