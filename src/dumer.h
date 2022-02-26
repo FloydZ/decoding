@@ -37,13 +37,17 @@ public:
 	const uint32_t weight_threshold;
 
 	// exit the program after X loops, regardless if a solution was found or not.
-	const uint64_t loops = -1;
+	#ifdef USE_LOOPS
+	const uint64_t loops        = USE_LOOPS;
+	#else
+	const uint64_t loops        = uint64_t(-1);
+	#endif
 
 	// check every X loop if another thread already found the solution.
-	const uint64_t exit_loops = 100;
+	const uint64_t exit_loops = 10000;
 
 	// print after X loops.
-	const uint64_t print_loops = 100;
+	const uint64_t print_loops = 10000;
 
 	// Number of rows we precompute in the M4RI step per block.
 	const uint32_t m4ri_k = matrix_opt_k(n - k, MATRIX_AVX_PADDING(n));
@@ -57,6 +61,12 @@ public:
 
 	// enable the low weight challenge code.
 	const bool LOWWEIGHT            = false;
+
+	// append `H1^n = w`
+	const bool TrivialAppendRow     = false;
+
+	// reduce the memory consumption of the program, by not save the values of the labels.
+	const bool no_values            = false;
 
 	// TODO alle HM flags
 	const bool HM1_STDBINARYSEARCH_SWITCH       = true;
@@ -78,7 +88,36 @@ public:
 	                      const uint32_t thresh)    //
 	    : n(n), k(k), w(w), p(p), l(l), number_buckets(buckets), weight_threshold(thresh)
 	{}
-
+	// prints information about the problem instance.
+	void print() const {
+		std::cout << "n: " << n
+		          << ", k: " << k
+		          << ", c: " << c
+		          << ", p: " << p
+		          << ", l: " << l
+		          << ", DOOM: " << DOOM
+		          << ", log(#buckets1): " << number_bucket
+		          << ", size_bucket1: " << size_bucket
+		          << ", threads: " << threads
+		          << ", m4ri_k: " << m4ri_k
+		          << ", weight_threshold: " << weight_threshold
+		          << ", loops: " << loops
+		          << ", print_loops: " << print_loops
+		          << ", exit_loops: " << exit_loops
+		          << ", epsilon: " << epsilon
+		          << ", Baselist_Full_Length: " << Baselist_Full_Length
+		          << ", TrivialAppendRow: " << TrivialAppendRow
+		          << ", no_values: " << no_values
+		          << ", HM1_STDBINARYSEARCH_SWITCH: " << HM1_STDBINARYSEARCH_SWITCH
+		          << ", HM1_INTERPOLATIONSEARCH_SWITCH: " << HM1_INTERPOLATIONSEARCH_SWITCH
+		          << ", HM1_LINEAREARCH_SWITCH: " << HM1_LINEAREARCH_SWITCH
+		          << ", HM1_USE_LOAD_IN_FIND_SWITCH: " << HM1_USE_LOAD_IN_FIND_SWITCH
+		          << ", HM1_SAVE_FULL_128BIT_SWITCH: " << HM1_SAVE_FULL_128BIT_SWITCH
+		          << ", HM1_USE_PREFETCH: " << HM1_USE_PREFETCH
+		          << ", HM1_USE_ATOMIC_LOAD: " << HM1_USE_ATOMIC_LOAD
+		          << ", HM1_USE_PACKED: " << HM1_USE_PACKED
+		          << "\n";
+	}
 };
 
 template<const ConfigDumer &config>
@@ -114,7 +153,7 @@ public:
 
 	// constants from the problem instance
 	constexpr static uint32_t n = config.n;// code length
-	constexpr static uint32_t k = config.k;// TODO add parity check row
+	constexpr static uint32_t k = config.k -config.TrivialAppendRow;
 	constexpr static uint32_t w = config.w;// code weight
 	constexpr static uint32_t p = config.p;// NOTE: from now on p is the baselist p not the full p.
 	constexpr static uint32_t l = config.l;// number of bits to match on the first (and only) level.
@@ -127,7 +166,7 @@ public:
 	using LoadType = IndexType;
 
 	using DecodingValue = Value_T<BinaryContainer<k + l - c>>;                      // type to hold `e2`
-	using DecodingLabel = Label_T<BinaryContainer<n - k>>;                          // type to hold `s`, the syndrome
+	using DecodingLabel = Label_T<BinaryContainer<n-config.k>>;                     // type to hold `s`, the syndrome
 	using DecodingMatrix = mzd_t *;                                                 // type to hold `H`
 	using DecodingElement = Element_T<DecodingValue, DecodingLabel, DecodingMatrix>;// type of the tuple (He, e)
 	using DecodingList = Parallel_List_T<DecodingElement>;                          // type of a list of tuples (He, 2)
@@ -151,8 +190,12 @@ public:
 	                                                                         // to have the `l` bit in a register on bit 0.
 	// precompute the list sizes depending on the given configuration.
 	constexpr static size_t
-	        lsize1 = config.Baselist_Full_Length ? bc(config.k + l - c, p) : bc(config.epsilon + ((config.k + l - c) / 2), p),
-	        lsize2 = (config.Baselist_Full_Length & !config.DOOM) ? bc(config.k + l - c - config.LOWWEIGHT, p) : bc(config.epsilon + ((config.k + l - c - config.LOWWEIGHT) - (config.k + l - c) / 2), p);
+	        lsize1 = config.Baselist_Full_Length ?
+	                                             bc(k + l - c, p) :
+	                                             bc(config.epsilon + ((k + l - c) / 2), p),
+	        lsize2 = (config.Baselist_Full_Length & !config.DOOM) ?
+	                                             bc(k + l - c - config.LOWWEIGHT, p) :
+	                                             bc(config.epsilon + ((k + l - c - config.LOWWEIGHT) - (k + l - c) / 2), p);
 
 	// list per thread size.
 	constexpr static uint32_t tL1len = lsize1 / threads;
@@ -179,16 +222,18 @@ public:
 	mzd_t *DOOM_S;     // if DOOM activated: matrix to all syndrome shifts
 	mzd_t *DOOM_S_View;// submatrix of H containing all shifts of the syndrome
 
+	mzd_t *trivial_row_row;
+
 	// Changelist.
 	ChangeList cL1, cL2;
 
 	// Baselists. Holding values and labels, with label=H*value. The values are constant whereas the labels must
 	// recompute for every permutation of the working matrix.
 	DecodingList L1{lsize1, threads, tL1len},// left list
-	        L2{lsize2, threads, tL2len};     // right list
+	             L2{lsize2, threads, tL2len};     // right list
 
 	// this is a helper declaration. I heavily use this to reuse function declared in the BJMM base class
-	constexpr static ConfigBJMM bjmmconfig{n, k, w, p, l, l, 1, 1, l, l, w - 4, threads, 1, false, true /*this sets base list full length to true*/};
+	constexpr static ConfigBJMM bjmmconfig{n, config.k, w, p, l, l, 1, 1, l, l, w - 4, threads, 1, !config.TrivialAppendRow /*reuse the DOOM field*/, false, 0, false, 0, 0, 1.0, config.no_values};
 
 	// hashmap configuration
 	constexpr static ConfigParallelBucketSort chm{0,                       // low bit to hash
@@ -248,6 +293,9 @@ public:
 		static_assert(((c != 0) + config.LOWWEIGHT) < 2, "CUTOFF AND LOWWEIGHT are not valid.");
 		static_assert(!config.DOOM, "currently not implemted\n");
 
+		config.print();
+		bjmmconfig.print();
+
 		// reset the `is a solution already found` flag
 		not_found = true;
 
@@ -255,12 +303,10 @@ public:
 		srand(ext_tid + ext_tid * time(nullptr));
 		random_seed(ext_tid + rand() * time(nullptr));
 
-#if defined(NUMBER_OUTER_THREADS) && NUMBER_OUTER_THREADS != 1
 		// Ok this is ridiculous.
 		// Apparently m4ris mzd_init is not thread safe. Cool.
-#pragma omp critical
+		#pragma omp critical
 		{
-#endif
 			// Transpose the input syndrome
 			sT = mzd_init(s->ncols, s->nrows);
 			mzd_transpose(sT, s);
@@ -291,43 +337,29 @@ public:
 					matrix_down_shift_into_matrix(DOOM_S, sT, i, i);
 				}
 
-				// TODO simplify
-				if constexpr (c == 0) {
-					wH = matrix_init(n - k, n + DOOM_nr);
-					wHT = mzd_init(wH->ncols, wH->nrows);
-					matrix_concat(wH, A, DOOM_S);
-				} else {
-					//outer_matrix_H  = matrix_init(n - k, n + 1);
-					//outer_matrix_HT = mzd_init(outer_matrix_H->ncols, outer_matrix_H->nrows);
-					//matrix_concat(outer_matrix_H, A, sT);
-					//work_matrix_H  = matrix_init(n - k, n - c + DOOM_nr + 1);
-					//work_matrix_H_T = mzd_init(work_matrix_H->ncols, work_matrix_H->nrows);
-				}
+				wH = matrix_init(n - k, n + DOOM_nr);
+				wHT = mzd_init(wH->ncols, wH->nrows);
+				matrix_concat(wH, A, DOOM_S);
 
-				H = mzd_init(n - k, k + l - c + DOOM_nr);
+				H = mzd_init(n-config.k, k + l - c + DOOM_nr);
 				HT = matrix_init(H->ncols, H->nrows);
 				DOOM_S_View = mzd_init_window(HT, k + l - c, 0, k + l + DOOM_nr - c, HT->ncols);
 			} else {
-				if constexpr (c == 0) {
-					wH = matrix_init(n - k, n + 1);
-					wHT = mzd_init(wH->ncols, wH->nrows);
-					mzd_t *tmp = matrix_concat(nullptr, A, sT);
-					mzd_copy(wH, tmp);
-					mzd_free(tmp);
-				} else {
-					// init all matrix structures
-					//outer_matrix_H  = matrix_init(n - k, n+1);
-					//outer_matrix_HT = mzd_init(outer_matrix_H->ncols, outer_matrix_H->nrows);
-					//matrix_concat(outer_matrix_H, A, sT);
-					//work_matrix_H  = matrix_init(n - k, n - c + 1);
-					//work_matrix_H_T = mzd_init(work_matrix_H->ncols, work_matrix_H->nrows);
-				}
+				wH = matrix_init(n-k, n + 1);
+				wHT = mzd_init(wH->ncols, wH->nrows);
+				mzd_t *tmp = matrix_concat(nullptr, A, sT);
+				mzd_copy(wH, tmp);
+				mzd_free(tmp);
 
-				H = mzd_init(n - k, k + l - c);
+				H = mzd_init(n-config.k, k + l - c);
 				HT = matrix_init(H->ncols, H->nrows);
 			}
 
-			// init the helper struct for the gaussian eleimination and permutation data structs.
+			if constexpr (config.TrivialAppendRow) {
+				wH = BJMM<bjmmconfig>::append_trivial_rows(wH);
+			}
+
+			// init the helper struct for the gaussian elimination and permutation data structs.
 			matrix_data = init_matrix_data(wH->ncols);
 			permutation = mzp_init(n - c);
 
@@ -337,10 +369,7 @@ public:
 				std::cout << "ExtTID: " << ext_tid << ", alloc error2\n";
 				exit(-1);
 			}
-
-#if defined(NUMBER_OUTER_THREADS) && NUMBER_OUTER_THREADS != 1
 		}
-#endif
 
 		// Init the target.
 		target.zero();
@@ -360,14 +389,16 @@ public:
 	}
 
 
+	/// TODO generalze BJMM version of this
 	/// if this functions is called we found the solution.
-	/// Becaue of this, this function is forced to not be inligned to reduce the
+	/// Because of this, this function is forced to not be inligned to reduce the
 	/// instruction cache misses.
 	/// \param label	final label computed in the tree.
 	/// \param npos		positions of the elements in the baselists summing up to the label
 	/// \param weight	weight of the final label
 	/// \param DOOM_index2 helper value if DOOM activated.
-	__attribute__((noinline)) void check_final_list(LabelContainerType &label,
+	__attribute__((noinline))
+	void check_final_list(LabelContainerType &label,
 	                                                IndexType npos[npos_size],
 	                                                const uint32_t weight,
 	                                                const uint32_t DOOM_index2) noexcept {
@@ -386,7 +417,23 @@ public:
 #endif
 
 				ValueContainerType value;
-				ValueContainerType::add_withoutasm(value, L1.data_value(npos[0]).data(), L2.data_value(npos[1]).data());
+				if constexpr (config.no_values == false) {
+					ValueContainerType::add_withoutasm(value, L1.data_value(npos[0]).data(), L2.data_value(npos[1]).data());
+				} else {
+
+					value.zero();
+					uint32_t P[p] = {0};
+
+					// TODO doom
+					for (uint32_t i = 0; i < 2; ++i) {
+						BJMM<bjmmconfig>::get_bits_set(P, npos[i], i%2, cL1, cL2);
+						for (uint32_t j = 0; j < p; ++j) {
+							value.flip_bit(P[j]);
+						}
+					}
+
+					std::cout << value << "\n";
+				}
 
 				// recompute the error vector by first setting the label and value at the correct
 				// position and then apply the back permutation.
@@ -440,7 +487,7 @@ public:
 			// start of the gaussian elemination phase
 			matrix_create_random_permutation(wH, wHT, permutation);
 			matrix_echelonize_partial_plusfix(wH, config.m4ri_k, n - k - l, this->matrix_data, 0, n - k - l, 0, this->permutation);
-			mzd_submatrix(H, wH, 0, n - k - l, n - k, n - c + DOOM_nr);
+			mzd_submatrix(H, wH, config.TrivialAppendRow, n-k-l, n-k, n-c+DOOM_nr);
 			matrix_transpose(HT, H);
 			// end of the gaussian elimination phase
 
@@ -451,7 +498,7 @@ public:
 				iTarget = extractor(target);
 			}
 
-			// parallel phase
+			//TODO parallel phase
 			{
 				const uint32_t tid = threads != 1 ? omp_get_thread_num() : 0;
 
@@ -607,7 +654,7 @@ public:
 
 	/// returns the expected size of the baselists and the out list.
 	constexpr static std::array<size_t, 2> ListSizes() noexcept {
-		size_t S1 = (lsize2 * lsize2) >> l1;
+		size_t S1 = (lsize2 * lsize2) >> l;
 		std::array<size_t, 2> ret{lsize2, S1};
 		return ret;
 	}
