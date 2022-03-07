@@ -1,3 +1,4 @@
+.local-history/
 __pycache__
 *.log
 cache.txt
