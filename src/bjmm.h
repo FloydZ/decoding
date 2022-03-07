@@ -583,13 +583,14 @@ public:
 #if !defined(BENCHMARK) && !defined(NO_LOGGING)
 			if (config.loops != uint64_t(-1)) {
 				std::cout << "IMPORTANT: TESTMODE: only " << config.loops << " permutations are tested\n";
-			}
-#endif
+			
 			chm1.print();
 #if defined(USE_MO) && USE_MO == 0
 			chm2.print();
 #endif
 			config.print();
+			}
+#endif
 		}
 
 		// Seed the internal prng.
@@ -1201,7 +1202,7 @@ public:
 					mzd_write_bit(e, 0, permutation->values[0], bit);
 				}
 
-#ifndef BENCHMARK
+#if !defined(NO_LOGGING)
 				std::cout << " pre perm \n";
 				std::cout << "weight n-k-l:" << ctr1 << "\n";
 				std::cout << "weight tree: " << ctr2 << "\n";
@@ -1979,7 +1980,6 @@ public:
 			std::cout << "|L_1|+|L_2|: " << (this->L1.bytes() + this->L2.bytes()) / (1<<20) << "MB\n";
 			double ctime = ((double)clock()-internal_time)/CLOCKS_PER_SEC;
 			std::cout << "Time: " << ctime << ", clock Time: " << ctime/config.nr_threads << "\n";
-#ifndef CHALLENGE
 			hm1->print();
 			hm2->print();
 		    auto LSizes = ListSizes();
@@ -1990,15 +1990,16 @@ public:
 			<< "\n\n" << std::flush;
 #endif
 #endif
-#endif
 	}
 
 	/// prints current loops information like: Hashmap usage, time, loops, ...
 	/// This function is intentionally not inlined to reduce the pressure on the instruction cache.
 	void __attribute__ ((noinline))
 	periodic_info() noexcept {
+#if !defined(NO_LOGGING)
 		double ctime = (((double)clock())-internal_time)/CLOCKS_PER_SEC;
 		std::cout << "\rcurrently at " << loops << " loops, " << ctime << "s, " << loops/ctime << "lps\n" << std::flush;
+#endif
 	}
 };
 
