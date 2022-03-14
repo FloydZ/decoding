@@ -108,6 +108,10 @@ int main(int argc, char** argv) {
 		BJMMNN<config> *obj         = new BJMMNN<config>(ee, ss, A, e_tid);
 #elif USE_MO != 0
 		MO<config> *obj             = new MO<config>(ee, ss, A, e_tid);
+#elif USE_PRANGE != 0
+		Prange<config> *obj         = new Prange<config>(ee, ss, A, e_tid);
+#elif USE_DUMER != 0
+		Dumer<config> *obj          = new Dumer<config>(ee, ss, A, e_tid);
 #else
 		BJMM<config> *obj           = new BJMM<config>(ee, ss, A, e_tid);
 #endif
