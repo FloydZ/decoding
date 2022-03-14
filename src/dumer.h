@@ -293,8 +293,10 @@ public:
 		static_assert(((c != 0) + config.LOWWEIGHT) < 2, "CUTOFF AND LOWWEIGHT are not valid.");
 		static_assert(!config.DOOM, "currently not implemted\n");
 
+#if !defined(NO_LOGGING)
 		config.print();
 		bjmmconfig.print();
+#endif
 
 		// reset the `is a solution already found` flag
 		not_found = true;
@@ -449,7 +451,7 @@ public:
 				}
 
 
-#ifndef BENCHMARK
+#if !defined(BENCHMARK) && !defined(NO_LOGGING)
 				std::cout << " pre perm \n";
 				std::cout << "weight input: " << weight << "\n";
 				std::cout << "loops:" << loops << " found\n";
@@ -464,6 +466,8 @@ public:
 				std::cout << L1.data_value(npos[0]).data() << " npos[0]:" << unsigned(npos[0]) << "\n";
 				std::cout << L2.data_value(npos[1]).data() << " npos[1]:" << unsigned(npos[1]) << "\n";
 #endif
+
+				mzd_print(e);
 			}
 #if NUMBER_THREADS != 1
 		}
@@ -683,8 +687,10 @@ public:
 	/// This function is intentionally not inlined to reduce the pressure on the instruction cache.
 	void __attribute__((noinline))
 	periodic_info() noexcept {
+#if !defined(NO_LOGGING)
 		double ctime = (((double) clock()) - internal_time) / CLOCKS_PER_SEC;
 		std::cout << "\rcurrently at " << loops << " loops, " << ctime << "s, " << loops / ctime << "lps" << std::flush;
+#endif
 	}
 };
 
