@@ -81,6 +81,8 @@ int main(int argc, char** argv) {
 	constexpr uint32_t weight_thresh = G_w-addweightthresh;
 	constexpr uint32_t mo_l = USE_MO ? G_l1 : G_l;
 	static constexpr ConfigBJMM config(n, k, G_w, G_p, G_l, G_l1, HM1_SIZEB, HM2_SIZEB, HM1_NRB, HM2_NRB, weight_thresh, NUMBER_THREADS, NUMBER_OUTER_THREADS, USE_DOOM, FULLLENGTH, CUTOFF, LOW_WEIGHT, MO_l2, MO_NRHM, ifactor, no_values, HM1_USESTDBINARYSEARCH, HM2_USESTDBINARYSEARCH, HM1_USEINTERPOLATIONSEARCH, HM2_USEINTERPOLATIONSEARCH, HM1_USELINEARSEARCH, HM2_USELINEARSEARCH, HM1_USELOAD, HM2_USELOAD, HM1_SAVEFULL128BIT, HM2_SAVEFULL128BIT, HM1_EXTENDTOTRIPLE, HM2_EXTENDTOTRIPLE, HM1_USEPREFETCH, HM2_USEPREFETCH, HM1_USEATOMICLOAD, HM2_USEATOMICLOAD, HM1_USEPACKED, HM2_USEPACKED, high_weight);
+#endif
+
 	mzd_t *AT = mzd_from_str(n, n-k, h);
 	mzd_t *A = mzd_transpose(NULL, AT);
 	mzd_t *ss;
@@ -93,7 +95,7 @@ int main(int argc, char** argv) {
 	mzd_t *ee = mzd_init(1, n);
 	mzd_t *ee_T = mzd_init(n, 1);
 
-#endif
+
 
 #if NUMBER_OUTER_THREADS > 1
 #pragma omp parallel default(none) shared(std::cout, ee, ss, A, ee_T, given_tid, loops_sum, finished, already_printed) num_threads(NUMBER_OUTER_THREADS)
