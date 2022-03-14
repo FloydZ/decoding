@@ -73,6 +73,10 @@ int main(int argc, char** argv) {
 	for (uint32_t i = 0; i < n; ++i) {
 		ee_T.set(2, 0, i);
 	}
+#elif USE_PRANGE
+	static constexpr ConfigPrange config(n, n-k, w, n, -1);
+#elif USE_DUMER
+	static constexpr ConfigDumer config(n, k, w, G_p, G_l, G_l, w-2);
 #else
 	constexpr uint32_t weight_thresh = G_w-addweightthresh;
 	constexpr uint32_t mo_l = USE_MO ? G_l1 : G_l;
