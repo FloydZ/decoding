@@ -40,7 +40,7 @@ public:
 	const uint32_t epsilon = 0;
 
 	// how many iterations
-	const uint32_t intermediate_target_loops = 1;
+	const uint32_t intermediate_target_loops = 1;//1u << 7u;
 
 	// Scaling factor for the different sorting/searching datastructures
 	const float scale_bucket = 1.0;
@@ -135,22 +135,32 @@ public:
 
 	// This flag enforces the hashmap to use a data structure which is packed (e.g.
 	// the different fields of the struct are not aligned).
-	const bool HM1_USE_PACKED                   = false;
-	const bool HM2_USE_PACKED                   = false;
+	const bool HM1_USE_PACKED                   = true;
+	const bool HM2_USE_PACKED                   = true;
 
 	// Set 0 zero to disable.
 	// See `BJMM::append_trivial_rows`
 	// If this value is set to anything else than zero, this number of rows will be appended to the working matrix wH.
 	// The goal is to decrease the code rate and therefore increase the performance of the algorithms.
-	const uint32_t TrivialAppendRows = 0;// TODO MO not working ClassicalTree ? 0 : (d == 3 ? 0 : (DOOM ? 0 : (Baselist_Full_Length ? 0 : (c != 0 ? 0 : 1))));
+	const uint32_t TrivialAppendRows = ClassicalTree ? 0 : (d == 3 ? 0 : (DOOM ? 0 : (c != 0 ? 0 : 1)));
 
 	// If this flag is set, the algorithm transform into its high weight variant.
 	// This means that for `finding` matches in the hashmaps we will not use any load factor
 	// anymore. The load factor is only used for inserting now. This reduces the cache
 	// misses for a find from 2 to 1.
-	bool HighWeightVariant = true;
+	bool HighWeightVariant  = false;
 
-	// Stop the outer loop after `loops` steps. Useful for benchmarking.
+	// if set to `true` an optimized m4ri version is used. This optimized version tracks along which
+	// unity vectors are permuted into/out the information set. Base on this, it re-permutes this vectors
+	// s.t. the gaussian elimination does not need to work through n-k-l vectors, but only those, which
+	// are not systemizes
+	bool OptM4RI            = true;
+
+	// If this options is set != 1 and 'OptM4RI' is true, not a random permutation is chosen, but
+	// only 'gaus_c' columns are permuted. NOTE: in this case an adapted runtime analyse must be used.
+	uint32_t gaus_c         = 0;
+
+// Stop the outer loop after `loops` steps. Useful for benchmarking.
 #ifdef USE_LOOPS
 	const uint64_t loops        = USE_LOOPS;
 #else
@@ -197,8 +207,12 @@ public:
 	                     const uint8_t HM1_EXTEND_TO_TRIPLE_SWITCH=0, const uint8_t HM2_EXTEND_TO_TRIPLE_SWITCH=0,          // if set to true, the hashmap gets one extra value in each element.
 	                     const bool HM1_USE_PREFETCH=false, const bool HM2_USE_PREFETCH=false,                              //
 	                     const bool HM1_USE_ATOMIC_LOAD=false, const bool HM2_USE_ATOMIC_LOAD=false,                        //
-	                     const bool HM1_USE_PACKED=false, const bool HM2_USE_PACKED=false,                                  //
-	                     const bool high_weight=false
+	                     const bool HM1_USE_PACKED=true, const bool HM2_USE_PACKED=true,                                    //
+	                     const bool high_weight=false,                                                                      //
+	                     const uint32_t intermediate_target_loops=1,                                                        //
+	                     const uint32_t seed=0,                                                                             //
+	                     const uint32_t gaus_c=0,                                                                           //
+	                     const bool gaus_opt=true                                                                           //
 	) :
 							 n(n),
 	                         k(k),
@@ -210,6 +224,7 @@ public:
 	                         m4ri_k(matrix_opt_k(n - k, MATRIX_AVX_PADDING(n))),
 	                         nr_threads(nt),
 	                         nr_outer_threads(nr_outer_threads),
+	                         intermediate_target_loops(intermediate_target_loops),
 	                         scale_bucket(iFactor),
 							 size_bucket1(sb1), size_bucket2(sb2),
 							 number_bucket1(nb1), number_bucket2(nb2),
@@ -235,7 +250,10 @@ public:
 							 HM1_USE_PREFETCH(HM1_USE_PREFETCH), HM2_USE_PREFETCH(HM2_USE_PREFETCH),
 	                         HM1_USE_ATOMIC_LOAD(HM1_USE_ATOMIC_LOAD), HM2_USE_ATOMIC_LOAD(HM2_USE_ATOMIC_LOAD),
 	                         HM1_USE_PACKED(HM1_USE_PACKED), HM2_USE_PACKED(HM2_USE_PACKED),
-	                         HighWeightVariant(high_weight)
+	                         HighWeightVariant(high_weight),
+	                         OptM4RI(gaus_opt),
+							 gaus_c(gaus_c),
+	                         seed(seed)
 	{};
 
 	// prints information about the problem instance.
@@ -264,6 +282,9 @@ public:
 		          << ", TrivialAppendRows: " << TrivialAppendRows
 				  << ", no_values: " << no_values
 				  << ", scale_bucket: " << scale_bucket
+		          << ", intermediate_target_loops: " << intermediate_target_loops
+				  << ", OptM4RI: " << OptM4RI
+		          << ", gaus_c: " << gaus_c
 				  << ", HM1_STDBINARYSEARCH_SWITCH: " << HM1_STDBINARYSEARCH_SWITCH
 				  << ", HM1_INTERPOLATIONSEARCH_SWITCH: " << HM1_INTERPOLATIONSEARCH_SWITCH
 				  << ", HM1_LINEAREARCH_SWITCH: " << HM1_LINEAREARCH_SWITCH
@@ -358,13 +379,6 @@ public:
 	typedef typename DecodingList::ValueContainerLimbType ValueContainerLimbType;
 	typedef typename DecodingList::LabelContainerLimbType LabelContainerLimbType;
 
-	// TODO remove?
-	// options for the matrix split
-	constexpr static uint32_t nkl_align = 128;
-	constexpr static uint32_t nkl_alignment = 0;//((nkl+nkl_align-1)/nkl_align)*nkl_align;
-	constexpr static uint32_t nkl_c = 0;//nkl_alignment - nkl;
-
-
 	// constant variables for the tree merge algorithm
 	constexpr static uint32_t threads = config.nr_threads;
 
@@ -374,7 +388,7 @@ public:
 			lsize1 = config.Baselist_Full_Length ?
 					bc(k+l-c, p) :
 					bc(config.epsilon + ((k + l - c) / 2), p),
-			lsize2 = (config.Baselist_Full_Length & !config.DOOM) ?
+			lsize2 = config.Baselist_Full_Length ?
 					bc(k+l-c-config.LOWWEIGHT, p) :
 					bc(config.epsilon + ((k + l - c -config.LOWWEIGHT) - (k + l - c) / 2), p);
 	constexpr static uint64_t thread_size_lists1 = lsize1 / threads, thread_size_lists2 = lsize2 / threads;
@@ -510,7 +524,7 @@ public:
 		return extractor_ptr(label.ptr());
 	};
 
-	static inline ArgumentLimbType extractor_ptr(const uint64_t *label) noexcept {
+	static inline ArgumentLimbType extractor_ptr(const uint64_t *__restrict__ label) noexcept {
 		if constexpr(config.DOOM) {
 			return Extractor::template extract<n-config.k-l, n-config.k>(label);
 		}
@@ -526,10 +540,11 @@ public:
 	constexpr static uint32_t npos_size = config.d == 3 ? 8 : 4;
 
 	// needed to randomize the baselists.
-	DecodingLabel target;
+	// alignment needed for the special alignment flag
+	alignas(32) DecodingLabel target;
 
 	// this is variable hold the `l`/`128` bits shifted down do zero.
-	ArgumentLimbType iTarget, iT1;
+	ArgumentLimbType iTarget=0, iTarget_org=0, iT1=0;
 
 	// Test/Bench parameter
 	uint32_t ext_tid = 0;
@@ -539,7 +554,7 @@ public:
 	bool init = true;
 
 	// just a helper value to count the elements which survive to the last level.
-	uint64_t last_list_counter = 0;
+	DEBUG_MACRO(uint64_t last_list_counter = 0;)
 
 	// measures the time without alle the preprocessing and allocating
 	double internal_time;
@@ -556,7 +571,12 @@ public:
 	///					This Flag is then passed to the internal rng.
 	/// \param not_init	Do not init the internal data structures like hashmap etc. Useful if a derived class
 	///			constructor is called.
-	BJMM(mzd_t *e, const mzd_t *const s, const mzd_t *const A, const uint32_t ext_tid = 0, const bool init=true)
+	BJMM(mzd_t *__restrict__ e,
+	     const mzd_t *__restrict__ const s,
+	     const mzd_t *__restrict__ const A,
+	     const uint32_t ext_tid = 0,
+	     const bool init=true,
+	     const bool init_matrix=true)
 			noexcept : e(e), s(s), A(A), ext_tid(ext_tid), init(init) {
 		static_assert(n > k, "wrong dimension");
 		static_assert(config.number_bucket1 <= l1, "wrong hm1 #bucket");
@@ -580,25 +600,22 @@ public:
 		// Make sure that some internal details are only accessed by the omp master thread.
 		#pragma omp master
 		{
-#if !defined(BENCHMARK) && !defined(NO_LOGGING)
+#if !defined(NO_LOGGING)
 			if (config.loops != uint64_t(-1)) {
 				std::cout << "IMPORTANT: TESTMODE: only " << config.loops << " permutations are tested\n";
-			
+			}
 			chm1.print();
 #if defined(USE_MO) && USE_MO == 0
 			chm2.print();
 #endif
 			config.print();
-			}
 #endif
+
 		}
 
 		// Seed the internal prng.
 		if (config.seed != 0) {
 			random_seed(config.seed + ext_tid);
-		} else {
-			srand(ext_tid + time(nullptr));
-			random_seed(ext_tid + rand() * time(nullptr));
 		}
 
 		// Ok this is ridiculous.
@@ -609,85 +626,87 @@ public:
 			sT = mzd_init(s->ncols, s->nrows);
 			mzd_transpose(sT, s);
 
-			// DOOM stuff
-			if constexpr(config.DOOM) {
-				// Note: k = n//2
-				//                n-k-l  n-k                                 n                      n+k
-				// ┌────────────────┬─────┬────────────────────────────────────┬───┬───┬─────────┬───┐
-				// │                │     │h_0    h_1  h_2     ...        h_k-1│   │   │         │   │
-				// │                │     │h_k-1  h_0  h_1     ...         h_0 │   │   │         │   │
-				// │                │  0  │h_k-2  h_k-1        ...             │ s │   │         │   │
-				// │                │  or │h_k-3  ...                          │ = │   │         │   │
-				// │    I_n-n/2-l   │  ┼  │                                    │ s0│ s1│   ...   │s_k-1
-				// │                │     │                                    │   │   │    |    │   │
-				// │                │     │         --> right shifts           │   │   │    ▼    │   │
-				// │ ---------------│-----│                                    │   │   │Down     │   │
-				// │                │  I  │                                    │   │   │  Shifts │   │
-				// └────────────────┴─────┴────────────────────────────────────┴───┴───┴─────────┴───┘ n-k=n//2
-				//    ◄──────────────────       ◄────────────────────────────
-				//              Both Blocks cyclic left shifts to receive the original error vector.
+			if (init_matrix) {
+				// DOOM stuff
+				if constexpr (config.DOOM) {
+					// Note: k = n//2
+					//                n-k-l  n-k                                 n                      n+k
+					// ┌────────────────┬─────┬────────────────────────────────────┬───┬───┬─────────┬───┐
+					// │                │     │h_0    h_1  h_2     ...        h_k-1│   │   │         │   │
+					// │                │     │h_k-1  h_0  h_1     ...         h_0 │   │   │         │   │
+					// │                │  0  │h_k-2  h_k-1        ...             │ s │   │         │   │
+					// │                │  or │h_k-3  ...                          │ = │   │         │   │
+					// │    I_n-n/2-l   │  ┼  │                                    │ s0│ s1│   ...   │s_k-1
+					// │                │     │                                    │   │   │    |    │   │
+					// │                │     │         --> right shifts           │   │   │    ▼    │   │
+					// │ ---------------│-----│                                    │   │   │Down     │   │
+					// │                │  I  │                                    │   │   │  Shifts │   │
+					// └────────────────┴─────┴────────────────────────────────────┴───┴───┴─────────┴───┘ n-k=n//2
+					//    ◄──────────────────       ◄────────────────────────────
+					//              Both Blocks cyclic left shifts to receive the original error vector.
 
-				static_assert(n / 2 == k);
-				DOOM_S = mzd_init(k, k);
+					static_assert(n / 2 == k);
+					DOOM_S = mzd_init(k, k);
 
-				// Generate the DOOM shifts
-				for (int i = 0; i < DOOM_nr; ++i) {
-					matrix_down_shift_into_matrix(DOOM_S, sT, i, i);
-				}
+					// Generate the DOOM shifts
+					for (int i = 0; i < DOOM_nr; ++i) {
+														  matrix_down_shift_into_matrix(DOOM_S, sT, i, i);
+														  }
 
-				if constexpr(config.c == 0) {
-					work_matrix_H = matrix_init(n - k, n + DOOM_nr);
-					work_matrix_H_T = mzd_init(work_matrix_H->ncols, work_matrix_H->nrows);
-					matrix_concat(work_matrix_H, A, DOOM_S);
+					if constexpr (config.c == 0) {
+													 work_matrix_H = matrix_init(n - k, n + DOOM_nr);
+													 work_matrix_H_T = mzd_init(work_matrix_H->ncols, work_matrix_H->nrows);
+													 matrix_concat(work_matrix_H, A, DOOM_S);
+													 } else {
+																outer_matrix_H = matrix_init(n - k, n + 1);
+																outer_matrix_HT = mzd_init(outer_matrix_H->ncols, outer_matrix_H->nrows);
+																matrix_concat(outer_matrix_H, A, sT);
+
+																work_matrix_H = matrix_init(n - k, n - c + DOOM_nr + 1);
+																work_matrix_H_T = mzd_init(work_matrix_H->ncols, work_matrix_H->nrows);
+																}
+
+					H = mzd_init(n - config.k, k + l - c + DOOM_nr);
+					HT = matrix_init(H->ncols, H->nrows);
+					DOOM_S_View = mzd_init_window(HT, k + l - c, 0, k + l + DOOM_nr - c, HT->ncols);
 				} else {
-					outer_matrix_H = matrix_init(n - k, n + 1);
-					outer_matrix_HT = mzd_init(outer_matrix_H->ncols, outer_matrix_H->nrows);
-					matrix_concat(outer_matrix_H, A, sT);
+					if constexpr (config.c == 0) {
+						   work_matrix_H = matrix_init(n - k, n + 1);
+						   work_matrix_H_T = mzd_init(work_matrix_H->ncols, work_matrix_H->nrows);
+						   mzd_t *tmp = matrix_concat(nullptr, A, sT);
+						   mzd_copy(work_matrix_H, tmp);
+						   mzd_free(tmp);
 
-					work_matrix_H = matrix_init(n - k, n - c + DOOM_nr + 1);
-					work_matrix_H_T = mzd_init(work_matrix_H->ncols, work_matrix_H->nrows);
+						   //mzd_print(work_matrix_H);
+						   if (config.TrivialAppendRows != 0)
+							   work_matrix_H = append_trivial_rows(work_matrix_H);
+						   //mzd_print(work_matrix_H);
+					} else {
+						   // init all matrix structures
+						   outer_matrix_H = matrix_init(n - k, n + 1);
+						   outer_matrix_HT = mzd_init(outer_matrix_H->ncols, outer_matrix_H->nrows);
+						   matrix_concat(outer_matrix_H, A, sT);
+
+						   work_matrix_H = matrix_init(n - k, n - c + 1);
+						   work_matrix_H_T = mzd_init(work_matrix_H->ncols, work_matrix_H->nrows);
+						   }
+
+						   H = mzd_init(n - config.k, k + l - c);
+						   HT = matrix_init(H->ncols, H->nrows);
 				}
 
-				H = mzd_init(n - config.k, k + l - c + DOOM_nr);
-				HT = matrix_init(H->ncols, H->nrows);
-				DOOM_S_View = mzd_init_window(HT, k + l - c, 0, k + l + DOOM_nr - c, HT->ncols);
-			} else {
-				if constexpr(config.c == 0) {
-					work_matrix_H = matrix_init(n - k, n + 1);
-					work_matrix_H_T = mzd_init(work_matrix_H->ncols, work_matrix_H->nrows);
-					mzd_t *tmp = matrix_concat(nullptr, A, sT);
-					mzd_copy(work_matrix_H, tmp);
-					mzd_free(tmp);
+				// init the helper struct for the gaussian eleimination and permutation data structs.
+				matrix_data = init_matrix_data(work_matrix_H->ncols);
+				permutation = mzp_init(n - c);
+				if (c != 0)
+					c_permutation = mzp_init(n);
 
-					//mzd_print(work_matrix_H);
-					if (config.TrivialAppendRows != 0)
-						work_matrix_H = append_trivial_rows(work_matrix_H);
-					//mzd_print(work_matrix_H);
-				} else {
-					// init all matrix structures
-					outer_matrix_H = matrix_init(n - k, n + 1);
-					outer_matrix_HT = mzd_init(outer_matrix_H->ncols, outer_matrix_H->nrows);
-					matrix_concat(outer_matrix_H, A, sT);
-
-					work_matrix_H = matrix_init(n - k, n - c + 1);
-					work_matrix_H_T = mzd_init(work_matrix_H->ncols, work_matrix_H->nrows);
+				// Check if the working matrices are all allocated
+				if ((work_matrix_H == nullptr) || (work_matrix_H_T == nullptr) || (sT == nullptr) ||
+					(H == nullptr) || (HT == nullptr) || (permutation == nullptr) || (matrix_data == nullptr)) {
+					std::cout << "ExtTID: " << ext_tid << ", alloc error2\n";
+					exit(-1);
 				}
-
-				H = mzd_init(n - config.k, k + l - c);
-				HT = matrix_init(H->ncols, H->nrows);
-			}
-
-			// init the helper struct for the gaussian eleimination and permutation data structs.
-			matrix_data = init_matrix_data(work_matrix_H->ncols);
-			permutation = mzp_init(n - c);
-			if (c != 0)
-				c_permutation = mzp_init(n);
-
-			// Check if the working matrices are all allocated
-			if ((work_matrix_H == nullptr) || (work_matrix_H_T == nullptr) || (sT == nullptr) ||
-			    (H == nullptr) || (HT == nullptr) || (permutation == nullptr) || (matrix_data == nullptr)) {
-				std::cout << "ExtTID: " << ext_tid << ", alloc error2\n";
-				exit(-1);
 			}
 		}
 
@@ -769,8 +788,30 @@ public:
 #endif
 	}
 
+
+	static bool check_matrix(const mzd_t *A, const uint32_t max_row) {
+		const uint32_t limit = A->nrows-config.TrivialAppendRows;
+
+		// check for unity matrix on n-k-l
+		for (uint32_t i = 0; i < limit; ++i) {
+			for (uint32_t j = 0; j < max_row; ++j) {
+				if (i == j) {
+					if (mzd_read_bit(A, i, j) != 1) {
+						return false;
+					}
+				} else {
+					if (mzd_read_bit(A, i, j) != 0) {
+						return false;
+					}
+				}
+			}
+		}
+
+		return true;
+	}
+
 	///
-	/// \param P array containig the the bit positons of the value at position 'pos'
+	/// \param P array containing the the bit positions of the value at position 'pos'
 	/// \param pos pos of the element in the value list the set bits need to be calculated
 	/// \param side if == 0: L1 is chosen
 	///					  1: L2 is chosen
@@ -853,8 +894,8 @@ public:
 	///		- epsilon is implemented
 	/// This function is intentionally quite abstract,to allow all other subclasses to us it.
 	/// This function generates a MITM chase sequence and fill the baselists values accordingly
-	/// \param bL1			output: left baselist
-	/// \param bL2			output: right baselist
+	/// \param bL1			output: left base list
+	/// \param bL2			output: right base list
 	/// \param diff_list1	output: change list for the left base list
 	/// \param diff_list2	output: change list for the right baselist
 	template<typename DecodingList=DecodingList>
@@ -938,9 +979,9 @@ public:
 		// resize the data.
 		// if we are in the doom setting, we want to enumerate L1 and L3 on the full length but L2 only on one half.
 		constexpr bool l2_halfsize = config.DOOM;
-		constexpr uint64_t lsize1 = bc(n_full, p);
-		constexpr uint64_t lsize2 = l2_halfsize ? bc(((k + l - c) - (k + l - c) / 2), p) : lsize1;
-		ASSERT(lsize1 == this->lsize1 && lsize2 == this->lsize2);
+		//constexpr uint64_t lsize1 = bc(n_full, p);
+		//constexpr uint64_t lsize2 = l2_halfsize ? bc(((k + l - c) - (k + l - c) / 2), p) : lsize1;
+		//ASSERT(lsize1 == this->lsize1 && lsize2 == this->lsize2);
 
 		cL1.resize(lsize1);
 		cL2.resize(lsize2);
@@ -1106,6 +1147,7 @@ public:
 	/// \param DOOM_index2	Only used in the NN/DOOM Setting.
 	///							DOOM: index of the syndrome we found a match to. Must be < k
 	///							NN: Index og the hashmap found the solution.
+	template<const uint32_t l_limit=config.l>
 	void __attribute__ ((noinline))
 	check_final_list(LabelContainerType &label,
 					   IndexType npos[4],
@@ -1129,7 +1171,9 @@ public:
 							(value, L1.data_value(npos[0]).data(),
 									L2.data_value(npos[1]).data());
 					ValueContainerType::add_withoutasm(value, value, L1.data_value(npos[2]).data());
-					ValueContainerType::add_withoutasm(value, value, L2.data_value(npos[3]).data());
+					if (!config.DOOM) {
+						ValueContainerType::add_withoutasm(value, value, L2.data_value(npos[3]).data());
+					}
 				} else {
 					value.zero();
 					uint32_t P[p] = {0};
@@ -1164,15 +1208,14 @@ public:
 					std::cout << label << " label3\n";
 				}
 
-				uint64_t ctr1 = 0;
-				uint64_t ctr2 = 0;
-
+				uint32_t ctr1 = 0;
+				uint32_t ctr2 = 0;
 
 				// recompute the error vector by first setting the label and value at the correct
 				// position and then apply the back permutation.
 				for (uint32_t j = config.TrivialAppendRows; j < n - c; ++j) {
 					uint32_t bit = 0;
-					constexpr uint32_t limit = n - k - l;
+					constexpr uint32_t limit = n - k - l_limit;
 					if (j < limit) {
 						bit = label[j-config.TrivialAppendRows];
 						ctr1 += bit;
@@ -1185,6 +1228,7 @@ public:
 						if (j == n-1)
 							bit = 1;
 					}
+
 					mzd_write_bit(e, 0, permutation->values[j], bit);
 				}
 
@@ -1192,8 +1236,8 @@ public:
 				//  Here we fix the trick by dropping the first row of the main matrix.
 				if(config.TrivialAppendRows == 1) {
 					auto bit = 0;
-					for (uint32_t i = n-k-l; i < n; ++i) {
-						if (value[i-(n-k-l)] == 1) {
+					for (uint32_t i = n-k-l_limit; i < n; ++i) {
+						if (value[i-(n-k-l_limit)] == 1) {
 							bit ^= mzd_read_bit(work_matrix_H, 0, i);
 						}
 					}
@@ -1207,7 +1251,7 @@ public:
 				std::cout << "weight n-k-l:" << ctr1 << "\n";
 				std::cout << "weight tree: " << ctr2 << "\n";
 				std::cout << "weight input: " << weight << "\n";
-				std::cout << "hashmap " << DOOM_index2 << " found\n";
+				std::cout << "hashmap/syndrome " << DOOM_index2 << " found\n";
 
 				std::cout << target << " target\n";
 				std::cout << label << " label\n";
@@ -1217,6 +1261,7 @@ public:
 				if constexpr(!config.DOOM) {
 					std::cout << L2.data_label(npos[3]).data() << " npos[3]:" << npos[3] << "\n";
 				}
+
 				if constexpr(config.d == 3) {
 					std::cout << L1.data_label(npos[4]).data() << " npos[4]\n";
 					std::cout << L2.data_label(npos[5]).data() << " npos[5]\n";
@@ -1258,6 +1303,7 @@ public:
 						for (int i = 0; i < k; ++i) {
 							mzd_write_bit(tmpe, 0, i, mzd_read_bit(e, 0, ((i+DOOM_index)%k)));
 						}
+
 						for (int i = 0; i < k; ++i) {
 							mzd_write_bit(tmpe, 0, k+i, mzd_read_bit(e, 0, k+((i+DOOM_index)%k)));
 						}
@@ -1272,6 +1318,7 @@ public:
 					DEBUG_MACRO(std::cout << "LOWWEIGHT : errors: " << LowWeight_LVL2_Weight_Counter << "\n";)
 				}
 
+				// the only thing we print if `NO_LOGGING` is activated
 				mzd_print(e);
 			}
 		}
@@ -1337,25 +1384,36 @@ public:
 					return loops;
 			}
 
-			matrix_create_random_permutation(work_matrix_H, work_matrix_H_T, permutation);
-			matrix_echelonize_partial_plusfix(work_matrix_H, config.m4ri_k, n-k-l, this->matrix_data, 0, n-k-l, 0, this->permutation);
+			if constexpr (config.OptM4RI) {
+				if constexpr (config.gaus_c == 0) {
+					matrix_echelonize_partial_plusfix_opt<n, k, l>
+					        (work_matrix_H, work_matrix_H_T, config.m4ri_k, n-k-l, this->matrix_data, permutation);
+				} else {
+					matrix_echelonize_partial_plusfix_opt_onlyc<n, k, l, config.gaus_c>
+					        (work_matrix_H, work_matrix_H_T, config.m4ri_k, n - k - l, this->matrix_data, permutation);
+				}
+			} else {
+				matrix_create_random_permutation(work_matrix_H, work_matrix_H_T, permutation);
+				matrix_echelonize_partial_plusfix(work_matrix_H, config.m4ri_k, n - k - l, this->matrix_data, 0, n - k - l, 0, this->permutation);
+			}
+
+			ASSERT(check_matrix(work_matrix_H, n-k-l));
 
 			// Extract the sub-matrices. the length of the matrix is only n-c + DOOM_nr but we need to copy everything.
             mzd_submatrix(H, work_matrix_H, config.TrivialAppendRows, n-k-l, n-k, n-c+DOOM_nr);
 			matrix_transpose(HT, H);
 
+			//mzd_print(work_matrix_H);
+
 			// helper structure only needed for debugging
 			Matrix_T<mzd_t *> HH((mzd_t *) H);
-
-			// generate a random intermediate target
-			iT1 = fastrandombits<ArgumentLimbType, l>();
 
 			// extract the syndrome as the last column of the parity check matrix.
 			if constexpr(!config.DOOM) {
 				target.data().column_from_m4ri(work_matrix_H, n-c-config.LOWWEIGHT, config.TrivialAppendRows);
 
 				// also extract only the l part of the target
-				iTarget = extractor(target) ^ iT1;
+				iTarget_org = extractor(target);
 			}
 
 #if	NUMBER_THREADS != 1
@@ -1364,8 +1422,8 @@ public:
 				{
 					// Tree: From now on everything is multithreading.
 					// The number at the end of a variable indicates the level its used in.
-					const uint32_t tid   = NUMBER_THREADS == 1 ? 0 : omp_get_thread_num();
-					const uint64_t b_tid = lsize2 / threads;    // blocksize of each thread. Note that we use `lsize2`,
+					const uint32_t tid   = threads == 1 ? 0 : omp_get_thread_num();
+					const uint64_t b_tid = lsize2 / threads;    // block size of each thread. Note that we use `lsize2`,
 
 				    // TODO todo remove das muss die liste berechnen
 				    // because we only iterate over L2.
@@ -1379,14 +1437,8 @@ public:
 											// within the `hm1->__buckets[pos]` array is returned.
 					LoadType load1 = 0, load2 = 0;
 					ArgumentLimbType data, data1;   // tmp variable. Depending on `l` this is rather a 64bit or 128bit wide value.
-					LabelContainerType label, label2, label3;
+				    alignas(32) LabelContainerType label, label2, label3;
 
-					// Pointer to the internal array of labels. Not that this pointer needs an offset depending on the thread_id.
-					// Instead of access this internal array we increment the
-					uint64_t *Lptr = (uint64_t *) L2.data_label() + (s_tid * llimbs_a);
-
-					// set the initial values of the `npos` array. Somehow this is not done by OpenMP
-					for (uint64_t j = 0; j < npos_size; ++j) { npos[j] = s_tid; }
 
 					// we need to first init the baselist L1.
 					// Note that `work_matrix_H_T` is already transposed in the `matrix_create_random_permutation` call.
@@ -1398,7 +1450,6 @@ public:
 
 					// initialize the buckets with -1 and the load array with zero. This needs to be done for all buckets.
 					hm1->reset(tid);
-					hm2->reset(tid);
 					OMP_BARRIER
 
 					// This is only the normal configuration:
@@ -1410,7 +1461,21 @@ public:
 					OMP_BARRIER
 					//ASSERT(hm1->check_sorted());
 
-					// image of a bucket element in the first level
+				    for (uint32_t interloops = 0; interloops < config.intermediate_target_loops; ++interloops) {
+					// Pointer to the internal array of labels. Not that this pointer needs an offset depending on the thread_id.
+					// Instead of access this internal array we increment the
+					uint64_t *Lptr = (uint64_t *) L2.data_label() + (s_tid * llimbs_a);
+
+					// set the initial values of the `npos` array. Somehow this is not done by OpenMP
+					for (uint64_t j = 0; j < npos_size; ++j) { npos[j] = s_tid; }
+					// generate a random intermediate target
+					iT1 = fastrandombits<ArgumentLimbType, l>();
+					iTarget = iTarget_org ^ iT1;
+
+					hm2->reset(tid);
+
+
+				    // image of a bucket element in the first level
 					//          L1      L2
 					//           \      /
 					//   HM1 [l, [i1, i2]], with l = L1[i1] xor L2[i2]
@@ -1454,7 +1519,7 @@ public:
 									pos1 += 1;
 								}
 							} else {
-								assert(0);
+								assert(0 && "not implemented");
 							}
 						}
 					}
@@ -1491,183 +1556,187 @@ public:
 					// do the second lst join between L3, L4.
 					if constexpr (!config.HighWeightVariant) {
 					    // Normal variant.
-					for (; npos[3] < upper_limit; ++npos[3], Lptr += BaseList4Inc) {
-						data = extractor_ptr(Lptr);
-						ASSERT((hm1->check_label(data, L2, npos[3])));
-						data ^= iTarget;
-						pos1 = hm1->find(data, load1);
+					    for (; npos[3] < upper_limit; ++npos[3], Lptr += BaseList4Inc) {
+						    data = extractor_ptr(Lptr);
+						    // ASSERT((hm1->check_label(data, L2, npos[3])));
+						    data ^= iTarget;
+						    pos1 = hm1->find(data, load1);
 
-						if constexpr(!config.DOOM  && !config.HM1_SAVE_FULL_128BIT_SWITCH) {
-							LabelContainerType::add(label, L2.data_label(npos[3]).data(), target.data());
-						}
+						    if constexpr (!config.DOOM && !config.HM1_SAVE_FULL_128BIT_SWITCH) {
+							    LabelContainerType::add(label, L2.data_label(npos[3]).data(), target.data());
+						    }
 
-						if constexpr ((chm1.b2 == chm1.b1) && (chm2.b2 == chm2.b1)) {
-							// if a solution exists, we know that every element in this bucket given is a solution
-							while (pos1 < load1) {
-								npos[2] = hm1->__buckets[pos1].second[0];
-								data1 = data ^ hm1->__buckets[pos1].first;
-								pos1 += 1;
+						    if constexpr ((chm1.b2 == chm1.b1) && (chm2.b2 == chm2.b1)) {
+							    // if a solution exists, we know that every element in this bucket given is a solution
+							    while (pos1 < load1) {
+								    npos[2] = hm1->__buckets[pos1].second[0];
+								    data1 = data ^ hm1->__buckets[pos1].first;
+								    pos1 += 1;
 
-								pos2 = hm2->find(data1, load2);
-								if (pos2 != IndexType(-1)) {
-									if constexpr(!config.DOOM) {
-										// only precompute the label of the two right baselists if we do not have 128
-										// bits in our hashmap to check the threshold.
-										if constexpr (!config.HM1_SAVE_FULL_128BIT_SWITCH) {
-											LabelContainerType::add(label2, label, L1.data_label(npos[2]).data());
-										}
-									} else {
-										LabelContainerType::add(label2.data().data(), L1.data_label(npos[2]).data().data().data(), Lptr);
-									}
-								}
+								    pos2 = hm2->find(data1, load2);
+								    if (pos2 != IndexType(-1)) {
+									    if constexpr (!config.DOOM) {
+										    // only precompute the label of the two right baselists if we do not have 128
+										    // bits in our hashmap to check the threshold.
+										    if constexpr (!config.HM1_SAVE_FULL_128BIT_SWITCH) {
+											    LabelContainerType::add(label2, label, L1.data_label(npos[2]).data());
+										    }
+									    } else {
+										    LabelContainerType::add(label2.data().data(), L1.data_label(npos[2]).data().data().data(), Lptr);
+									    }
+								    }
 
-								while (pos2 < load2) {
-									npos[0] = hm2->__buckets[pos2].second[0];
-									npos[1] = hm2->__buckets[pos2].second[1];
+								    while (pos2 < load2) {
+									    npos[0] = hm2->__buckets[pos2].second[0];
+									    npos[1] = hm2->__buckets[pos2].second[1];
 
-									pos2 += 1;
-									DEBUG_MACRO(last_list_counter +=1;)
+									    pos2 += 1;
+									    DEBUG_MACRO(last_list_counter += 1;)
 
-									// if activated this is an early exit of the last level of the tree.
-									if constexpr (config.HM1_SAVE_FULL_128BIT_SWITCH) {
-										const ArgumentLimbType data2 = data1 ^ hm2->__buckets[pos2-1].first;
-										const uint32_t iweight = __builtin_popcountll(data2 >> 64u);
+									    // if activated this is an early exit of the last level of the tree.
+									    if constexpr (config.HM1_SAVE_FULL_128BIT_SWITCH) {
+										    const ArgumentLimbType data2 = data1 ^ hm2->__buckets[pos2 - 1].first;
+										    const uint32_t iweight = __builtin_popcountll(data2 >> 64u);
 
-										if (likely(iweight > config.weight_threshhold)) {
-											continue;
-										}
+										    if (likely(iweight > config.weight_threshhold)) {
+											    continue;
+										    }
 
-										if (likely((__builtin_popcountll(data2) + iweight) > config.weight_threshhold)) {
-											continue;
-										}
+										    if (likely((__builtin_popcountll(data2) + iweight) > config.weight_threshhold)) {
+											    continue;
+										    }
 
-										LabelContainerType::add(label3, L2.data_label(npos[1]).data(), L1.data_label(npos[0]).data());
-										LabelContainerType::add(label2, L2.data_label(npos[3]).data(), L1.data_label(npos[2]).data());
-										LabelContainerType::add(label2, label2, target);
-									}
+										    LabelContainerType::add(label3, L2.data_label(npos[1]).data(), L1.data_label(npos[0]).data());
+										    LabelContainerType::add(label2, L2.data_label(npos[3]).data(), L1.data_label(npos[2]).data());
+										    LabelContainerType::add(label2, label2, target.data());
+									    }
 
-									if constexpr (!config.HM1_SAVE_FULL_128BIT_SWITCH) {
-										LabelContainerType::add(label3, L2.data_label(npos[1]).data(), L1.data_label(npos[0]).data());
-									}
+									    if constexpr (!config.HM1_SAVE_FULL_128BIT_SWITCH) {
+										    LabelContainerType::add(label3, L2.data_label(npos[1]).data(), L1.data_label(npos[0]).data());
+									    }
 
-									uint32_t weight;
-									if constexpr(!config.DOOM) {
-										#ifdef DEBUG
-										weight = LabelContainerType::template add_only_upper_weight_partly_withoutasm<lupper, lumask>(label3, label3, label2);
+									    uint32_t weight;
+									    if constexpr (!config.DOOM) {
+#ifdef DEBUG
+										    weight = LabelContainerType::template add_only_upper_weight_partly_withoutasm<lupper, lumask>(label3, label3, label2);
 
-										LabelContainerType ltmp;
-										LabelContainerType::add(ltmp, label3, target.data());
-										for (uint32_t i = n-config.k-l; i < n-config.k; ++i) {
-											if ((label3[i] != 0 ) && (ltmp[i] != 0)) {
-												std::cout << target << " target\n";
-												std::cout << label3 << " error label3\n";
-												std::cout << ltmp << " error ltmp\n";
-												ASSERT(false);
-											}
-										}
-										#else
-										weight = LabelContainerType::template add_only_upper_weight_partly_withoutasm_earlyexit<lupper, lumask, config.weight_threshhold>(label3, label3, label2);
-										#endif
-									} else {
-										weight = LabelContainerType::add_weight(label3.data().data(), label3.data().data(),label2.data().data());
-									}
+										    LabelContainerType ltmp;
+										    LabelContainerType::add(ltmp, label3, target.data());
+										    for (uint32_t i = n - config.k - l; i < n - config.k; ++i) {
+											    if ((label3[i] != 0) && (ltmp[i] != 0)) {
+												    std::cout << target << " target\n";
+												    std::cout << label3 << " error label3\n";
+												    std::cout << ltmp << " error ltmp\n";
+												    ASSERT(false);
+											    }
+										    }
+#else
+										    weight = LabelContainerType::template add_only_upper_weight_partly_withoutasm_earlyexit<lupper, lumask, config.weight_threshhold>(label3, label3, label2);
+#endif
+									    } else {
+										    weight = LabelContainerType::add_weight(label3.data().data(),
+											                                        label3.data().data(),
+											                                        label2.data().data());
+#ifdef DEBUG
+										    for (uint32_t i = n - config.k - l; i < n - config.k; ++i) {
+												//std::cout << label3 << "\n";
+											    if (label3[i] != 0) {
+												    std::cout << label3 << " error label3\n";
+												    ASSERT(false);
+											    }
+										    }
+#endif
+									    }
 
-									// DEBUG: this is stupid
-									if constexpr (config.LOWWEIGHT) {
-										if (unlikely(weight < 4)) {
-											DEBUG_MACRO(LowWeight_LVL2_Weight_Counter += 1;)
-											continue;
-										}
-									}
+									    // DEBUG: this is stupid
+									    if constexpr (config.LOWWEIGHT) {
+										    if (unlikely(weight < 4)) {
+											    DEBUG_MACRO(LowWeight_LVL2_Weight_Counter += 1;)
+											    continue;
+										    }
+									    }
 
-									// check if we found the solution
-									if (likely(weight > config.weight_threshhold)) {
-										continue;
-									}
+									    // check if we found the solution
+									    if (likely(weight > config.weight_threshhold)) {
+										    continue;
+									    }
 
-									check_final_list(label3, npos, weight, npos[3]);
-								}
-							}
-						} else if constexpr(chm1.b2 == chm1.b1) {
-							while (pos1 < load1) {
-								npos[2] = hm1->__buckets[pos1].second[0];
-								data1 = data ^ hm1->__buckets[pos1].first;
-								pos1 += 1;
+									    check_final_list(label3, npos, weight, npos[3]);
+								    }
+							    }
+						    } else if constexpr (chm1.b2 == chm1.b1) {
+							    while (pos1 < load1) {
+								    npos[2] = hm1->__buckets[pos1].second[0];
+								    data1 = data ^ hm1->__buckets[pos1].first;
+								    pos1 += 1;
 
-								pos2 = hm2->find(data1, load2);
-								if (pos2 != IndexType(-1)) {
-									if constexpr(!config.DOOM) {
-										//LabelContainerType::add(label, L1.data_label(npos[2]).data(), L2.data_label(npos[3]).data());
-										//LabelContainerType::add(label, label, target);
-										LabelContainerType::add(label2, label, L1.data_label(npos[2]).data());
-									} else {
-										LabelContainerType::add(label2.data().data(), L1.data_label(npos[2]).data().data().data(), Lptr);
-									}
-								}
+								    pos2 = hm2->find(data1, load2);
+								    if (pos2 != IndexType(-1)) {
+									    if constexpr (!config.DOOM) {
+										    //LabelContainerType::add(label, L1.data_label(npos[2]).data(), L2.data_label(npos[3]).data());
+										    //LabelContainerType::add(label, label, target);
+										    LabelContainerType::add(label2, label, L1.data_label(npos[2]).data());
+									    } else {
+										    LabelContainerType::add(label2.data().data(), L1.data_label(npos[2]).data().data().data(), Lptr);
+									    }
+								    }
 
-								while (pos2 != IndexType(-1)) {
-									hm2->template traverse_drop<0, 2>(data1, pos2, npos, load2);
+								    while (pos2 != IndexType(-1)) {
+									    hm2->template traverse_drop<0, 2>(data1, pos2, npos, load2);
 
-									LabelContainerType::add(label3, L2.data_label(npos[1]).data(), L1.data_label(npos[0]).data());
+									    LabelContainerType::add(label3, L2.data_label(npos[1]).data(), L1.data_label(npos[0]).data());
 
-									DEBUG_MACRO(last_list_counter +=1;)
+									    DEBUG_MACRO(last_list_counter += 1;)
 
-									uint32_t weight;
-									if constexpr(!config.DOOM) {
-										weight = LabelContainerType::template add_only_upper_weight_partly_withoutasm_earlyexit<lupper, lumask, config.weight_threshhold>(label3, label3, label2);
-									} else {
-										weight = LabelContainerType::add_weight(label3.data().data(), label3.data().data(),label2.data().data());
-									}
+									    uint32_t weight;
+									    if constexpr (!config.DOOM) {
+										    weight = LabelContainerType::template add_only_upper_weight_partly_withoutasm_earlyexit<lupper, lumask, config.weight_threshhold>(label3, label3, label2);
+									    } else {
+										    weight = LabelContainerType::add_weight(label3.data().data(), label3.data().data(), label2.data().data());
+									    }
 
-									if (weight > config.weight_threshhold) {
-										continue;
-									}
-									check_final_list(label3, npos, weight, 0);
-								}
-							}
-						} else {
-							// Fallback code if the two hashmaps are not fully sorted via buckets
-							while (HM1BucketIndexType(pos1) != HM1BucketIndexType(-1)) {
-								data1 = hm1->template traverse<2, 1>(data, pos1, npos, load1);
-								pos2 = hm2->find(data1, load2);
+									    if (weight > config.weight_threshhold) {
+										    continue;
+									    }
+									    check_final_list(label3, npos, weight, 0);
+								    }
+							    }
+						    } else {
+							    // Fallback code if the two hashmaps are not fully sorted via buckets
+							    while (HM1BucketIndexType(pos1) != HM1BucketIndexType(-1)) {
+								    data1 = hm1->template traverse<2, 1>(data, pos1, npos, load1);
+								    pos2 = hm2->find(data1, load2);
 
-								if constexpr(!config.DOOM) {
-									LabelContainerType::add(label2, label, L1.data_label(npos[2]).data());
-								} else {
-									LabelContainerType::add(label2.data().data(), L1.data_label(npos[2]).data().data().data(), Lptr);
-								}
+								    if constexpr (!config.DOOM) {
+									    LabelContainerType::add(label2, label, L1.data_label(npos[2]).data());
+								    } else {
+									    LabelContainerType::add(label2.data().data(), L1.data_label(npos[2]).data().data().data(), Lptr);
+								    }
 
-								while (HM2BucketIndexType(pos2) != HM2BucketIndexType(-1)) {
-									hm2->template traverse_drop<0, 2>(data1, pos2, npos, load2);
-									LabelContainerType::add(label3, L2.data_label(npos[1]).data(), L1.data_label(npos[0]).data());
+								    while (HM2BucketIndexType(pos2) != HM2BucketIndexType(-1)) {
+									    hm2->template traverse_drop<0, 2>(data1, pos2, npos, load2);
+									    LabelContainerType::add(label3, L2.data_label(npos[1]).data(), L1.data_label(npos[0]).data());
 
-									uint32_t weight;
-									if constexpr(!config.DOOM) {
-										weight = LabelContainerType::template add_only_upper_weight_partly_withoutasm_earlyexit<lupper, lumask, config.weight_threshhold>(label3, label3, label2);
-									} else {
-										weight = LabelContainerType::add_weight(label3.data().data(), label3.data().data(),label2.data().data());
-									}
+									    uint32_t weight;
+									    if constexpr (!config.DOOM) {
+										    weight = LabelContainerType::template add_only_upper_weight_partly_withoutasm_earlyexit<lupper, lumask, config.weight_threshhold>(label3, label3, label2);
+									    } else {
+										    weight = LabelContainerType::add_weight(label3.data().data(), label3.data().data(), label2.data().data());
+									    }
 
-									if (weight > config.weight_threshhold) {
-										continue;
-									}
-									check_final_list(label3, npos, weight, 0);
-								}
-							}
-						}
-					}
-					} else { // high weight variant
+									    if (weight > config.weight_threshhold) {
+										    continue;
+									    }
+									    check_final_list(label3, npos, weight, 0);
+								    }
+							    }
+						    }
+					    }
+				    } else { // high weight variant
 						for (; npos[3] < upper_limit; ++npos[3], Lptr += BaseList4Inc) {
-							if constexpr(config.DOOM) {
-								data = Extractor::template extract<n-config.k-l, n-config.k>(Lptr);
-							} else {
-								if constexpr (config.HM1_SAVE_FULL_128BIT_SWITCH) {
-									data = Extractor::template add<n-config.k-128, n-config.k, n-config.k-l>(Lptr, target.ptr());
-								} else {
-									data = Extractor::template add<n-config.k-l, n-config.k>(Lptr, target.ptr());
-								}
-								// TODO ASSERT((hm1->check_label(data, L2, npos[3])));
-							}
+							data = extractor_ptr(Lptr);
+							ASSERT((hm1->check_label(data, L2, npos[3])));
+							data ^= iTarget;
 
 							pos1 = hm1->traverse_find(data);
 							const size_t limit1 = pos1 + config.size_bucket1;
@@ -1703,21 +1772,6 @@ public:
 										npos[1] = hm2->__buckets[pos2].second[1];
 
 										DEBUG_MACRO(last_list_counter +=1;)
-										//printbinary(data1);
-										//std::cout << " data 1\n";
-										//printbinary(hm2->__buckets[pos2].first);
-										//std::cout << " hm2 data\n";
-										//printbinary(data1 ^ hm2->__buckets[pos2].first);
-										//std::cout << " data ^ hm2 data\n";
-
-										//std::cout << L1.data_label(npos[0]).data() << " npos[0]:" << npos[0] << "\n";
-										//std::cout << L2.data_label(npos[1]).data() << " npos[1]:" << npos[1] << "\n";
-										//std::cout << L1.data_label(npos[2]).data() << " npos[2]:" << npos[2] << "\n";
-										//std::cout << L2.data_label(npos[3]).data() << " npos[3]:" << npos[3] << "\n";
-
-										//std::cout << target << " target\n";
-										//std::cout << iT1 << " iT1\n";
-
 										// increment the counter after the debugging output
 										pos2 += 1;
 
@@ -1786,8 +1840,8 @@ public:
 							}
 						}
 					}
-				}
-
+				    }
+			    } // finish interloops
 				// print onetime information
 				if (unlikely(loops == 0)) {
 					info();

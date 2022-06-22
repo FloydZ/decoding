@@ -439,7 +439,7 @@ public:
 
 				// recompute the error vector by first setting the label and value at the correct
 				// position and then apply the back permutation.
-				for (int j = 0; j < n - c; ++j) {
+				for (uint32_t j = 0; j < n - c; ++j) {
 					uint32_t bit;
 					constexpr uint32_t limit = n - k - l;
 					if (j < limit) {
@@ -516,7 +516,7 @@ public:
 				uint64_t *Lptr;
 
 				// init the
-				for (int j = 0; j < npos_size; ++j) { npos[j] = s_tid; }
+				for (uint32_t j = 0; j < npos_size; ++j) { npos[j] = s_tid; }
 
 				// after everything was initializes fill the two baselists following the precomputed chase sequence.
 				BJMM<bjmmconfig>::BJMM_fill_decoding_lists(L1, L2, cL1, cL2, HT, tid);
