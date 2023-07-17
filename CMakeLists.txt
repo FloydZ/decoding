@@ -37,6 +37,8 @@ add_custom_target (
         COMMAND ${CMAKE_SOURCE_DIR}/setup.sh
 )
 
+find_package(OpenMP REQUIRED)
+
 # some helper variables
 # possible values are: [-DVALUE_KARY, -DVALUE_BINARY]
 # the first enables a k-ary implementation of the class 'Value'
@@ -65,17 +67,17 @@ if(APPLE)
     link_directories(/opt/homebrew/lib)
 
     set(ADDITIONAL_FLAGS "-DUSE_ARM")
-    set(DEBUG_FLAGS "-g -Og -DDEBUG -fopenmp ${ALLOWED_WARNINGS} ${VALUE_FLAG} ${SANITIZER_FLAGS} ${ADDITIONAL_FLAGS}")
-    set(OPTIMIZE_FLAGS "-O3 -DNDEBUG -fno-exceptions -fopenmp ${ALLOWED_WARNINGS} ${VALUE_FLAG} ${SANITIZE_FLAG} ${ADDITIONAL_FLAGS}")
+    set(DEBUG_FLAGS "-g -Og -DDEBUG ${OpenMP_CXX_FLAGS} ${ALLOWED_WARNINGS} ${VALUE_FLAG} ${SANITIZER_FLAGS} ${ADDITIONAL_FLAGS}")
+    set(OPTIMIZE_FLAGS "-O3 -flto -DNDEBUG -fno-exceptions ${OpenMP_CXX_FLAGS} ${ALLOWED_WARNINGS} ${VALUE_FLAG} ${SANITIZE_FLAG} ${ADDITIONAL_FLAGS}")
 else()
     #set(ADDITIONAL_FLAGS "-DUSE_AVX2  -fno-inline")
     #set(ADDITIONAL_FLAGS "-DUSE_AVX2 -Werror=dangling-reference")
     set(ADDITIONAL_FLAGS "-DUSE_AVX2")
 
     set(AVX512_FLAGS "-DUSE_AVX512 -mavx512f -mavx512dq  -mavx512bf16 -mavx512cd  -mavx512bw -mavx512vl -mavx512vbmi -mavx512ifma -mavx512vbmi2 -mavx512vnni -mavx512bitalg -mavx512vpopcntdq")
-    set(AVX2_FLAGS "-mavx2 -mavx -mbmi -mbmi2")
-    set(DEBUG_FLAGS "-g -O0 -DDEBUG -Wall -Wpedantic -pedantic -march=native -fopenmp ${AVX2_FLAGS} ${AVX512_FLAGS} ${ALLOWED_WARNINGS} ${VALUE_FLAG} ${SANITIZER_FLAGS} ${ADDITIONAL_FLAGS}")
-    set(OPTIMIZE_FLAGS "-g -march=native -mavx2 -mavx -mbmi2 -O3 -flto -DNDEBUG -fopenmp -ffast-math -ftree-vectorize -funroll-loops -fno-exceptions ${AVX2_FLAGS} ${AVX512_FLAGS} ${ALLOWED_WARNINGS} ${VALUE_FLAG} ${SANITIZE_FLAGS} ${ADDITIONAL_FLAGS}")
+    set(AVX2_FLAGS "-DUSE_AVX2 -mavx2 -mavx -mbmi -mbmi2")
+	set(DEBUG_FLAGS "-g -O0 -DDEBUG -Wall -Wpedantic -pedantic -march=native ${OpenMP_CXX_FLAGS} ${AVX2_FLAGS} ${AVX512_FLAGS} ${ALLOWED_WARNINGS} ${VALUE_FLAG} ${SANITIZER_FLAGS} ${ADDITIONAL_FLAGS}")
+	set(OPTIMIZE_FLAGS "-g -march=native -mavx2 -mavx -mbmi2 -O3 -flto -DNDEBUG ${OpenMP_CXX_FLAGS} -ffast-math -ftree-vectorize -funroll-loops -fno-exceptions ${AVX2_FLAGS} ${AVX512_FLAGS} ${ALLOWED_WARNINGS} ${VALUE_FLAG} ${SANITIZE_FLAGS} ${ADDITIONAL_FLAGS}")
 endif()
 
 if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
