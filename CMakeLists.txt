@@ -52,9 +52,6 @@ set(MALLOC_LIBRARY "")
 #set(SANITIZE_FLAG "-fsanitize=address")
 set(SANITIZE_FLAGS "")
 
-#set(ADDITIONAL_FLAGS "-DUSE_AVX2  -fno-inline")
-#set(ADDITIONAL_FLAGS "-DUSE_AVX2 -Werror=dangling-reference")
-set(ADDITIONAL_FLAGS "-DUSE_AVX2")
 
 set(ALLOWED_WARNINGS " -Wno-unused-function -Wno-unused-local-typedef -Wno-overlength-strings -Wno-unknown-pragmas -Wno-unused-variable -Wno-unused-local-typedefs")
 
@@ -62,7 +59,6 @@ set(ALLOWED_WARNINGS " -Wno-unused-function -Wno-unused-local-typedef -Wno-overl
 if(APPLE)
     include_directories(/opt/homebrew/opt/libomp/include)
     include_directories(/opt/homebrew/include)
-    link_directories(/opt/homebrew/opt/libomp/link)
     link_directories(/opt/homebrew/opt/libomp/lib)
     link_directories(/usr/local/lib)
     link_directories(/usr/lib)
@@ -72,6 +68,10 @@ if(APPLE)
     set(DEBUG_FLAGS "-g -Og -DDEBUG -fopenmp ${ALLOWED_WARNINGS} ${VALUE_FLAG} ${SANITIZER_FLAGS} ${ADDITIONAL_FLAGS}")
     set(OPTIMIZE_FLAGS "-O3 -flto -DNDEBUG -fno-exceptions ${ALLOWED_WARNINGS} ${VALUE_FLAG} ${SANITIZE_FLAG} ${ADDITIONAL_FLAGS}")
 else()
+    #set(ADDITIONAL_FLAGS "-DUSE_AVX2  -fno-inline")
+    #set(ADDITIONAL_FLAGS "-DUSE_AVX2 -Werror=dangling-reference")
+    set(ADDITIONAL_FLAGS "-DUSE_AVX2")
+
     set(AVX512_FLAGS "-DUSE_AVX512 -mavx512f -mavx512dq  -mavx512bf16 -mavx512cd  -mavx512bw -mavx512vl -mavx512vbmi -mavx512ifma -mavx512vbmi2 -mavx512vnni -mavx512bitalg -mavx512vpopcntdq")
     set(DEBUG_FLAGS "-g -O0 -DDEBUG -Wall -Wpedantic -pedantic -march=native -mavx2 -mavx -mbmi ${AVX512_FLAGS} ${ALLOWED_WARNINGS} ${VALUE_FLAG} ${SANITIZER_FLAGS} ${ADDITIONAL_FLAGS}")
     set(OPTIMIZE_FLAGS "-g -march=native -mavx2 -mavx -mbmi2 -O3 -flto -DNDEBUG -ffast-math -ftree-vectorize -funroll-loops -fno-exceptions ${AVX512_FLAGS} ${ALLOWED_WARNINGS} ${VALUE_FLAG} ${SANITIZE_FLAGS} ${ADDITIONAL_FLAGS}")
