@@ -26,6 +26,7 @@ public:
 	// at what weight on the first n-k-l coordinates do we classify a label as a solution.
 	const uint32_t weight_threshhold = w - 4 * baselist_p;
 
+
 	const int m4ri_k; // opt parameter for faster gaus elimination
 					  // calculated on the fly. You normally don't have to touch this.
 
@@ -40,7 +41,7 @@ public:
 	const uint32_t epsilon = 0;
 
 	// how many iterations
-	const uint32_t intermediate_target_loops = 1;//1u << 7u;
+	const uint32_t intermediate_target_loops = 1;
 
 	// Scaling factor for the different sorting/searching datastructures
 	const float scale_bucket = 1.0;
@@ -154,7 +155,7 @@ public:
 	// unity vectors are permuted into/out the information set. Base on this, it re-permutes this vectors
 	// s.t. the gaussian elimination does not need to work through n-k-l vectors, but only those, which
 	// are not systemizes
-	bool OptM4RI            = true;
+	bool OptM4RI            = false;
 
 	// If this options is set != 1 and 'OptM4RI' is true, not a random permutation is chosen, but
 	// only 'gaus_c' columns are permuted. NOTE: in this case an adapted runtime analyse must be used.
@@ -212,7 +213,7 @@ public:
 	                     const uint32_t intermediate_target_loops=1,                                                        //
 	                     const uint32_t seed=0,                                                                             //
 	                     const uint32_t gaus_c=0,                                                                           //
-	                     const bool gaus_opt=true                                                                           //
+	                     const bool gaus_opt=false                                                                         //
 	) :
 							 n(n),
 	                         k(k),
@@ -445,12 +446,12 @@ public:
 	                                               uint64_t(1) << config.number_bucket2, threads, 2, n-config.k-l, l, 0, 0,
 	                                               config.HM2_STDBINARYSEARCH_SWITCH, config.HM2_INTERPOLATIONSEARCH_SWITCH,
 												   config.HM2_LINEAREARCH_SWITCH, config.HM2_USE_LOAD_IN_FIND_SWITCH,
-												   config.HM2_SAVE_FULL_128BIT_SWITCH, config.HM2_EXTEND_TO_TRIPLE_SWITCH,
+							  		 			   config.HM2_SAVE_FULL_128BIT_SWITCH, config.HM2_EXTEND_TO_TRIPLE_SWITCH,
 	                                               config.HM2_USE_PREFETCH, config.HM2_USE_ATOMIC_LOAD,
 	                                               config.HighWeightVariant,
 	                                               config.HM2_USE_PACKED
 	};
-
+	
 	// we do not have to care about the possibility that the l part can be spun about 2 limbs. because we do not touch the l part.
 	constexpr static uint32_t llimbs    = LabelContainerType::limbs();              // number of limbs=uint64_t which are processed of a label
 	constexpr static uint32_t llimbs_a  = LabelContainerType::bytes()/8;
@@ -584,10 +585,12 @@ public:
 			static_assert(config.number_bucket2 <= l, "wrong hm2 #bucket");
 		}
 
+
 		if constexpr (!config.HM1_USE_ATOMIC_LOAD && config.HM2_USE_ATOMIC_LOAD) {
 			static_assert((config.size_bucket1 % threads == 0) && (config.size_bucket2 % threads == 0), "wrong #threads");
 			static_assert((threads <= config.size_bucket1) && (threads <= config.size_bucket2), "wrong #threads");
 		}
+
 		static_assert((config.DOOM + config.LOWWEIGHT) < 2, "DOOM AND LOWWEIGHT are not valid.");
 		static_assert(((config.c != 0) + config.LOWWEIGHT) < 2, "CUTOFF AND LOWWEIGHT are not valid.");
 		if constexpr(config.HM1_SAVE_FULL_128BIT_SWITCH || config.HM2_SAVE_FULL_128BIT_SWITCH) {
@@ -790,11 +793,12 @@ public:
 
 
 	static bool check_matrix(const mzd_t *A, const uint32_t max_row) {
-		const uint32_t limit = A->nrows-config.TrivialAppendRows;
+		const uint32_t limit_col = A->nrows-config.TrivialAppendRows;
+		const uint32_t limit_row = config.gaus_c ? config.gaus_c : max_row;
 
 		// check for unity matrix on n-k-l
-		for (uint32_t i = 0; i < limit; ++i) {
-			for (uint32_t j = 0; j < max_row; ++j) {
+		for (uint32_t i = 0; i < limit_col; ++i) {
+			for (uint32_t j = 0; j < limit_row; ++j) {
 				if (i == j) {
 					if (mzd_read_bit(A, i, j) != 1) {
 						return false;
@@ -1118,7 +1122,7 @@ public:
 			LabelContainerType::add(L2.data_label(start2).data(),
 			                        L2.data_label(start2).data(),
 			                        iTarget->data(),
-					// TODO right limits?
+									// TODO right limits?
 					                config.n-config.k-config.l+config.l1, config.n-config.k);
 		}
 
@@ -1327,7 +1331,9 @@ public:
 	/// IMPORTANT: This code is only valid if the parameter c is unequal ot 0.
 	uint64_t __attribute__ ((noinline))
 	BJMMF_Outer() noexcept {
-		uint64_t loops = 0;
+		ASSERT(config.c > 0);
+
+		loops = 0;
 		uint64_t outer_loops = 0;
 		while (not_found) {
 			matrix_create_random_permutation(outer_matrix_H, outer_matrix_HT, c_permutation);
@@ -1348,6 +1354,7 @@ public:
 			for (uint32_t i = 0; i < n - k; ++i) {
 				mzd_write_bit(work_matrix_H, i, n - c, mzd_read_bit(outer_matrix_H, i, n));
 			}
+
 			loops += BJMMF();
 			outer_loops += 1;
 		}
@@ -1368,12 +1375,14 @@ public:
 		// reset loop counter, to allow multiple runs.
 		loops = 0;
 
-		// stupid test, i wanted to test this during compile time. but thats not possible
+		// stupid test, I wanted to test this during compile time. but that's not possible
 		// because the constructor is also called from MO
 		if constexpr (config.HM1_EXTEND_TO_TRIPLE_SWITCH || config.HM2_EXTEND_TO_TRIPLE_SWITCH) {
 			std::cout << "ett not implemented for BJMM\n";
 			return 0;
 		}
+
+		// mzd_t *backdoor_H = mzd_copy(NULL, work_matrix_H);
 
 		// start the whole thing
 		while (not_found && loops < config.loops) {
@@ -1383,6 +1392,8 @@ public:
 				if (loops >= config.c_inner_loops)
 					return loops;
 			}
+
+			// mzd_copy(work_matrix_H, backdoor_H);
 
 			if constexpr (config.OptM4RI) {
 				if constexpr (config.gaus_c == 0) {
@@ -1397,13 +1408,13 @@ public:
 				matrix_echelonize_partial_plusfix(work_matrix_H, config.m4ri_k, n - k - l, this->matrix_data, 0, n - k - l, 0, this->permutation);
 			}
 
+			// mzd_print(work_matrix_H);
 			ASSERT(check_matrix(work_matrix_H, n-k-l));
 
 			// Extract the sub-matrices. the length of the matrix is only n-c + DOOM_nr but we need to copy everything.
-            mzd_submatrix(H, work_matrix_H, config.TrivialAppendRows, n-k-l, n-k, n-c+DOOM_nr);
+			mzd_submatrix(H, work_matrix_H, config.TrivialAppendRows, n-k-l, n-k, n-c+DOOM_nr);
 			matrix_transpose(HT, H);
 
-			//mzd_print(work_matrix_H);
 
 			// helper structure only needed for debugging
 			Matrix_T<mzd_t *> HH((mzd_t *) H);
@@ -1445,8 +1456,8 @@ public:
 					// Additionally, we have to keep a hash map of L1 for the whole inner loop.
 					BJMM_fill_decoding_lists(L1, L2, cL1, cL2, HT, tid);
 					OMP_BARRIER
-					ASSERT(check_list(L1, HH, tid));
-					ASSERT(check_list(L2, HH, tid));
+					//ASSERT(check_list(L1, HH, tid));
+					//ASSERT(check_list(L2, HH, tid));
 
 					// initialize the buckets with -1 and the load array with zero. This needs to be done for all buckets.
 					hm1->reset(tid);
@@ -1461,17 +1472,35 @@ public:
 					OMP_BARRIER
 					//ASSERT(hm1->check_sorted());
 
-				    for (uint32_t interloops = 0; interloops < config.intermediate_target_loops; ++interloops) {
+					// reset intermediate target
+					iT1 = 0;
+				    
+					for (uint64_t interloops = 0; interloops < config.intermediate_target_loops; interloops += 1, iT1 += 1) {
 					// Pointer to the internal array of labels. Not that this pointer needs an offset depending on the thread_id.
 					// Instead of access this internal array we increment the
 					uint64_t *Lptr = (uint64_t *) L2.data_label() + (s_tid * llimbs_a);
 
+					
 					// set the initial values of the `npos` array. Somehow this is not done by OpenMP
 					for (uint64_t j = 0; j < npos_size; ++j) { npos[j] = s_tid; }
-					// generate a random intermediate target
-					iT1 = fastrandombits<ArgumentLimbType, l>();
-					iTarget = iTarget_org ^ iT1;
 
+					// generate a random intermediate target, old approach
+					//iT1 = fastrandombits<ArgumentLimbType, l>();
+					//iTarget = iTarget_org ^ iT1;
+					
+					// generate a random intermediate target, except for the fact
+					// that we are not completly randomly choosen it. Because 
+					// there is a good chance that we are choosing two distinct
+					// targets s.t. t1 xor s = t2. This will not help the algorithm
+					// to recover the error
+					while ((iT1 ^ iTarget_org) < iT1) {
+						iT1 += 1;
+					}
+					
+					iTarget = iTarget_org ^ iT1;
+					
+					// reset the hashmap. This means clearing the load factor,
+					// this will not overwrite the content of the buckets.
 					hm2->reset(tid);
 
 
@@ -1491,8 +1520,11 @@ public:
 
 						if constexpr (!config.HighWeightVariant) {
 							pos1 = hm1->find(data, load1);
+							// easy case, we do not need to binary search over
+							// the bucket
 							if constexpr (chm1.b2 == chm1.b1) {
-								// if a solution exists, we know that every element in this bucket given is a solution
+								// if a solution exists, we know that every 
+								// element in this bucket given is a solution, too
 								while (pos1 < load1) {
 									npos[0] = hm1->__buckets[pos1].second[0];
 									data1 = data ^ hm1->__buckets[pos1].first;
@@ -1558,7 +1590,7 @@ public:
 					    // Normal variant.
 					    for (; npos[3] < upper_limit; ++npos[3], Lptr += BaseList4Inc) {
 						    data = extractor_ptr(Lptr);
-						    // ASSERT((hm1->check_label(data, L2, npos[3])));
+						    ASSERT((hm1->check_label(data, L2, npos[3])));
 						    data ^= iTarget;
 						    pos1 = hm1->find(data, load1);
 
@@ -1842,6 +1874,7 @@ public:
 					}
 				    }
 			    } // finish interloops
+
 				// print onetime information
 				if (unlikely(loops == 0)) {
 					info();
@@ -1862,7 +1895,6 @@ public:
 
 				// and last but least update the loop counter
 				loops += 1;
-
 		}
 
 #if !defined(BENCHMARK) && !defined(NO_LOGGING)
@@ -2028,10 +2060,12 @@ public:
 			if constexpr(c != 0) {
 				std::cout << ", log(outer_loops): " << LogOuterLoops(n, c) << ", outer_loops: " << OuterLoops(n, c) ;
 			}
+
 			std::cout << "\n|Value|: " << DecodingValue::size() << ", |Label|:" << DecodingLabel::size() << "\n";
 		    std::cout << "|L_1|: " << this->L1.size() << "\n";
 			std::cout << "|L_1|: " << this->L1.bytes() / (1<<20) << "MB\n";
 			std::cout << "|L_1|+|L_2|: " << (this->L1.bytes() + this->L2.bytes()) / (1<<20) << "MB\n";
+			
 			double ctime = ((double)clock()-internal_time)/CLOCKS_PER_SEC;
 			std::cout << "Time: " << ctime << ", clock Time: " << ctime/config.nr_threads << "\n";
 			hm1->print();
@@ -2046,8 +2080,9 @@ public:
 #endif
 	}
 
-	/// prints current loops information like: Hashmap usage, time, loops, ...
-	/// This function is intentionally not inlined to reduce the pressure on the instruction cache.
+	/// prints current loops information like: time, loops, ...
+	/// This function is intentionally not inlined to reduce the pressure on
+	/// the instruction cache.
 	void __attribute__ ((noinline))
 	periodic_info() noexcept {
 #if !defined(NO_LOGGING)

@@ -1,21 +1,8 @@
-import argparse
-import json
-import os
-import random
-import string
-from subprocess import Popen, PIPE, STDOUT
-
-import math
-import scipy.special as ss
-import time
-
-try:
-    from math import comb as binom
-except:
-    pass
-
-from math import log2,inf
+#from sage.all import *
+from math import comb as binom
+from math import log2, inf
 from math import *
+import math
 
 
 def __truncate(x, precision):
@@ -79,7 +66,7 @@ def _gaussian_elimination_complexity(n, k, r):
     return (n - k) ** 2
 
 
-def _optimize_m4ri(n, k, mem=inf):
+def _optimize_m4ri(n: int, k: int, mem=inf):
     """
     Find optimal blocksize for Gaussian elimination via M4RI
     INPUT:
@@ -89,7 +76,8 @@ def _optimize_m4ri(n, k, mem=inf):
 
     (r, v) = (0, inf)
     for i in range(n - k):
-        tmp = log2(_gaussian_elimination_complexity(n, k, i))
+        tmp = float(_gaussian_elimination_complexity(n, k, i))
+        tmp = math.log2(tmp)
         if v > tmp and r < mem:
             r = i
             v = tmp
@@ -107,6 +95,35 @@ def _mem_matrix(n, k, r):
     return n - k + 2 ** r
 
 
+def _list_merge_async_complexity(L1,L2, l, hmap):
+    """
+    Complexity estimate of merging two lists exact
+
+    INPUT:
+
+    - ``L`` -- size of lists to be merged
+    - ``l`` -- amount of bits used for matching
+    - ``hmap`` -- indicates if hashmap is being used (Default 0: no hashmap)
+
+    EXAMPLES::
+
+        sage: from tii.asymmetric_ciphers.cbc.complexities.syndrome_decoding.binary_estimator import _list_merge_complexity
+        sage: _list_merge_complexity(L=2**16,l=16,hmap=1) # random
+
+    """
+
+    if L1 == 1 and L2==1:
+        return 1
+    if L1==1:
+        return L2
+    if L2==1:
+        return L1
+    if not hmap:
+        return 0 #to be implemented
+    else:
+        return L1+L2 + L1*L2 // 2 ** l
+
+
 def _list_merge_complexity(L, l, hmap):
     """
     Complexity estimate of merging two lists exact
@@ -119,7 +136,7 @@ def _list_merge_complexity(L, l, hmap):
     if L == 1:
         return 1
     if not hmap:
-        return max(1, 2 * int(log2(L)) * L + L ** 2 // 2 ** l)
+        return max(1, 2 * int(math.log2(L)) * L + L ** 2 // 2 ** l)
     else:
         return 2 * L + L ** 2 // 2 ** l
 
@@ -141,7 +158,7 @@ def _indyk_motwani_complexity(L, l, w, hmap, lam=0):
     if w == 0:
         return _list_merge_complexity(L, l, hmap)
     if lam==0 or lam>l-w:
-        lam = max(0, int(min(ceil(log2(L)), l - 2 * w)))
+        lam = max(0, int(min(math.ceil(math.log2(L)), l - 2 * w)))
     return binom(l, lam) // binom(l - w, lam) * _list_merge_complexity(L, lam, hmap)
 
 
@@ -178,10 +195,10 @@ def prange_complexity(n, k, w, mem=inf, memory_access=0):
     - ``memory_access`` -- specifies the memory access cost model (default: 0, choices: 0 - constant, 1 - logarithmic, 2 - square-root, 3 - cube-root or deploy custom function which takes as input the logarithm of the total memory usage)
     """
 
-    solutions = max(0, log2(binom(n, w)) - (n - k))
+    solutions = max(0, math.log2(binom(n, w)) - (n - k))
 
     r = _optimize_m4ri(n, k, mem)
-    Tp = max(log2(binom(n, w)) - log2(binom(n - k, w)) - solutions, 0)
+    Tp = max(math.log2(binom(n, w)) - log2(binom(n - k, w)) - solutions, 0)
     Tg = log2(_gaussian_elimination_complexity(n, k, r))
     time = Tp + Tg
     memory = log2(_mem_matrix(n, k, r))
@@ -193,3 +210,47 @@ def prange_complexity(n, k, w, mem=inf, memory_access=0):
     par = {"r": params[0]}
     res = {"time": time, "memory": memory, "parameters": par}
     return res
+
+
+def marcovchain_number_perms(n: int, k: int, w: int, c: int, p: int, l: int):
+    """
+    :param n: code length
+    :param k: code dimension
+    :param w: weight
+    :param c: number of coordinates to exchange during each gaussian elimination
+    :param p: weight of the good state
+    :param l: window
+    Example:
+
+        p = 3
+        n = 2918
+        k = n//2
+        w = 56
+        l = 0
+        c = 95
+        number_perms(n,k,w,c,p,l)
+    :return: number of expected iteration in logarithmic notation
+    """
+    R1 = RealField(150)
+
+    def transition(u: int, d: int, c: int, n: int, k: int, w: int, l: int):
+        # from u to u+d by exchanging c columns
+        return R1(sum(binom(w-u, i) * binom(n-k-l-w+u, c-i) * binom(u, i-d) * binom(k+l-u, c+d-i)
+                      for i in range(max(d, 0), min(w-u+1, c+1, c+d+1))))/R1(binom(n-k-l, c) * binom(k+l, c))
+    A = matrix(R1, w+1, w+1)
+    for i in range(w+1):
+        for j in range(w+1):
+            A[i,j] = transition(i, j-i, c, n, k, w, l)
+
+    # transition matrix excluding success-state
+    B = A[[i for i in range(w+1) if i!=p],[i for i in range(w+1) if i!=p]]
+
+    # fundamental matrix of markov process
+    R = (identity_matrix(R1, w, w)-B)**(-1)
+
+    # initial state of markov chain
+    state = [(binom(n-k,w-i)*binom(k,i))/binom(n,w) for i in range(w+1) if i!=p]
+
+    # number of permutations
+    return math.log2(sum(state[i]*sum(R[i,j] for j in range(w)) for i in range(w))) - log2(n-k)
+

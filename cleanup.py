@@ -3,7 +3,6 @@ import re, sys
 from os import listdir
 from os.path import isfile, join
 
-
 def parse_n(file: str):
     regex = r".*n(\d+).*"
     data = re.findall(regex, file)
@@ -161,6 +160,9 @@ def calc(file: str, time=600, single_tree=False, lessout=False):
 
 def mo_calc(file):
     with open(file, 'r') as f:
+        threads = 256
+        seconds = 600
+
         lines = list(f.readlines())
         revlines = list(reversed(lines))
 
@@ -183,13 +185,11 @@ def mo_calc(file):
 
         thregex = "currently at (\d+) .*"
         thregexdata = []
-        for line in revlines[:128]:
+        for line in revlines[:threads]:
             data = re.findall(thregex, line)
             if data:
                 thregexdata.append(float(data[0]))
 
-        threads = 128
-        seconds = 600
         offset1 = sum(firstregexdata)/len(firstregexdata)
         offset2 = sum(secregexdata)/len(secregexdata)
         loops = sum(thregexdata)/len(thregexdata)
@@ -200,13 +200,13 @@ def mo_calc(file):
         print("RealLoops:", loops*offset1, offset1)
         print("RealLoops:", (loops-1)*offset2, offset2)
 
+
 def main(argv):
     if len(argv) < 2:
         return
     if isfile(argv[1]):
         return mo_calc(argv[1])
     return
-
 
     if isfile(argv[1]):
         return calc(argv[1])

@@ -1,4 +1,4 @@
-This is the implementation of the [paper](TODO).
+This is the implementation of the [paper](https://eprint.iacr.org/2021/1634) and our second [paper](https://eprint.iacr.org/2022/1329).
 
 Requirements
 ----
@@ -11,7 +11,34 @@ sudo pacman -S cmake make autoconf automake
 
 Ubuntu:
 ```bash
-sudo apt install autoconf automake make cmake
+sudo apt install autoconf automake make cmake libpng-dev libtool libmpfr-dev libmpfr-doc libmpfr6 libmpfrc++-dev libomp-dev clang libgtest-dev 
+```
+
+CentOS:
+```bash
+sudo yum install yum-utils
+sudo yum-config-manager --enable extras
+sudo yum makecache
+sudo yum install autoconf automake cmake clang gcc gcc-c++ libtool gmp-devel mpfr mpfr-devel git libarchive cuda-command-line-tools-11-6  cuda-nvcc-11-6.x86_64 vim cuda-libraries-devel-11-6.x86_64 cuda-libraries-11-6.x86_64 tmux cuda-compiler-11-6.x86_64 cuda-demo-suite-11-6-11.6.55-1.x86_64 cuda-minimal-build-11-6.x86_64 epel-release htop python39-pip cuda-curand-dev-10-2.x86_64 cuda-libraries-devel-11-6.x86_64 cuda-samples-11-6.x86_64 libpng
+
+# install cuda sample
+cd /usr/local/cuda/sample/
+sudo git clone https://github.com/nvidia/cuda-samples
+
+# install gtest
+cd ~
+git clone https://github.com/google/googletest
+cd googletest
+mkdir build
+cd build
+cmake ..
+make 
+sudo make install
+cd ~
+
+# fix libpng
+cd /usr/lib64
+sudo ln -s  libpng16.so.16.34.0 libpng.so
 ```
 
 MacOS:
@@ -41,14 +68,21 @@ export CPPFLAGS="-I/usr/local/opt/llvm/include"
 Windows:
 you probably want to reevaluate some life decisions.
 
+
+Python
+---
+```bash
+pip install scipy numpy pprint
+```
+
 Reproduction of results:
 ---
 Important: You need a C++20 rdy compiler. For our records we used `clang++-13-rc1`. But 
 
 ```bash
 # its important to name the build directory `cmake-build-release`. Its hardcoded in some file... yeah i know, its a todo
-git clone --recurse-submodules -j4 https://github.com/FloydZ/decoding
-cd decoding && mkdir cmake-build-release && cd cmake-build-release && cmake -DCMAKE_BUILD_TYPE=Release .. && cd ..
+git clone --recurse-submodules -j4 git@git.noc.ruhr-uni-bochum.de:cits/decoding.git
+cd decoding && mkdir cmake-build-release && cd cmake-build-release && cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang .. && cd ..
 chmod +x setup.sh
 ./setup.sh
 
@@ -70,6 +104,11 @@ make main_profile2
 ./main_profile2
 ```
 
+To recompute our the records from our second paper use the following command:
+```bash
+python3 gen.py -n3138 -l24 -l1 9  -p 1 --lowweight_w 56 --hm1_bucketsize 7   --hm2_bucketsize 3 --hm1_nrbuckets 9  --hm2_nrbuckets 15 --intermediate_target_loops 171 --quasicyclic --threads 1 --outer_threads 1 --print_loops 100 --seconds 600  --bjmm_fulllength
+```
+
 if you only have an ancient compiler which does not support `PGO` replace the `make` commands with:
 ```bash
 make main
@@ -81,15 +120,6 @@ High Memory
 ---
 The following commands where used for the high memory benchmark. Note: most of them need around 2TB of memory. Set the number of threads working in parallel on different permutations accordingly to reduce the memory consumption.
 ```bash
-python3 gen.py -n1284 -l49 -l1 24 -p 3 --hm1_bucketsize 6 --hm2_bucketsize 2 --hm1_nrbuckets 24 --hm2_nrbuckets 25 --threads 1 --outer_threads 256 --print_loops 1 --seconds 3600 --bjmm_special_alignment --force_container_alignment --no_values 1 --high_weight 1 --hm1_savefull128bit 1 --hm2_savefull128bit 1
-python3 gen.py -n1347 -l49 -l1 25 -p 3 --hm1_nrbuckets 25 --hm2_nrbuckets 24 --hm1_bucketsize 4 --hm2_bucketsize 3 --threads 1 --outer_threads 256 --print_loops 1 --seconds 3600 --force_container_alignment --no_values 1 --high_weight 1  
-python3 gen.py -n1409 -l50 -l1 24 -p 3 --hm1_nrbuckets 24 --hm2_nrbuckets 26 --hm1_bucketsize 4 --hm2_bucketsize 3 --threads 1 --outer_threads 256 --print_loops 1 --seconds 3600 --force_container_alignment --no_values 1 --high_weight 1
-python3 gen.py -n1473 -l50 -l1 24 -p 3 --hm1_nrbuckets 24 --hm2_nrbuckets 26 --hm1_bucketsize 4 --hm2_bucketsize 3 --threads 1 --outer_threads 256 --print_loops 1 --seconds 3600 --force_container_alignment --no_values 1 --high_weight 1
-python3 gen.py -n1536 -l49 -l1 24 -p 3 --hm1_nrbuckets 24 --hm2_nrbuckets 25 --hm1_bucketsize 4 --hm2_bucketsize 4 --threads 1 --outer_threads 256 --print_loops 1 --seconds 3600 --force_container_alignment --no_values 1 --high_weight 1
-```
-
-Altenative one can start playing around with this basic configuration:s
-```bash
 python3 gen.py -n1223 -l49 -l1 24 -p 3 --hm1_bucketsize 24 --hm2_bucketsize 25 --hm1_nrbuckets 4 --hm2_nrbuckets 4 --threads 2 --outer_threads 1 --bjmm_special_alignment --force_huge_page --seconds 600 --benchmark
 python3 gen.py -n1284 -l49 -l1 25 -p 3 --hm1_bucketsize 25 --hm2_bucketsize 24 --hm1_nrbuckets 4 --hm2_nrbuckets 4 --threads 2 --outer_threads 1 --bjmm_special_alignment --force_huge_page --seconds 600 --benchmark
 python3 gen.py -n1409 -l50 -l1 25 -p 3 --hm1_bucketsize 25 --hm2_bucketsize 25 --hm1_nrbuckets 1 --hm2_nrbuckets 1 --threads 2 --outer_threads 1 --force_huge_page --seconds 600 --benchmark 
@@ -100,8 +130,7 @@ python3 gen.py -n1665 -l52 -l1 25 -p 3 --hm1_bucketsize 25 --hm2_bucketsize 27 -
 python3 gen.py -n1730 -l52 -l1 25 -p 3 --hm1_bucketsize 25 --hm2_bucketsize 27 --hm1_nrbuckets 1 --hm2_nrbuckets 1 --threads 2 --outer_threads 1 --force_huge_page --seconds 600 --benchmark
 python3 gen.py -n1796 -l52 -l1 25 -p 3 --hm1_bucketsize 25 --hm2_bucketsize 27 --hm1_nrbuckets 1 --hm2_nrbuckets 1 --threads 2 --outer_threads 1 --force_huge_page --seconds 600 --benchmark
 ```
-
-It can be faster for your system to include `--force_huge_page`, `--force_container_alignment`, `--hm2_extendtotriple 128`, `--high_weight 1`, `--hm1_savefull128bit 1`, `--hm2_savefull128bit 1` and `--no_values 1 `. In general you need to play a little with the flags, to get the best results.
+It can be faster for your system to include `--force_huge_page` and `--force_container_alignment`. In general you need to play a little with the flags, to get the best results.
 
 Quasi Cyclic:
 ===
@@ -178,7 +207,6 @@ Performance Graphs:
 A little helper to find performance holes. Note that you should compile wile `-fno_inline` to get better results.
 ```bash
 flamegraph -o mceliece_1284_l19_noinline.svg ./test/mceliece/mceliece_test_bjmm1284 --gtest_filter='BJMM.t1284_small:BJMM/*.t1284_small:*/BJMM.t1284_small/*:*/BJMM/*.t1284_small --gtest_color=no'
-
 ```
 
 Bolt
@@ -266,3 +294,51 @@ Implemented Algorithms
 - Hybrid Tree
 - Nearest Neighbour Stream Join approach
 - sparsity
+
+TODO
+====
+Explain 
+```
+python3 --bench
+python3 --optimize
+python3 --calc_loops
+```
+
+Core Binding
+----
+Either via
+    - `sudo taskset -c 1 ./main`
+or 
+    - `OMP_PLACES=cores OMP_PROC_BIND=close ./main`, `OMP_PLACES=cores OMP_PROC_BIND=spread ./main`
+or 
+    - `for j in {0..127}; do sudo taskset -c ${j} ./main & done` 
+
+Polly/Bolt
+---
+cmake -DCMAKE_BUILD_TYPE=Release -D CMAKE_CXX_COMPILER=~/Downloads/BOLT/build_server1/bin/clang++  -DCMAKE_LINKER=clang++-14 -DCMAKE_CXX_LINK_EXECUTABLE="<CMAKE_LINKER> <FLAGS> <CMAKE_CXX_LINK_FLAGS> <LINK_FLAGS> <OBJECTS> -o <TARGET> <LINK_LIBRARIES>"  ..
+
+
+~/Downloads/BOLT/build_server1/bin/llvm-bolt main_bolt -instrument -jump-tables=move -o main_bolt_out -align-macro-fusion=all
+~/Downloads/BOLT/build_server1/bin/llvm-bolt main_bolt -o main_bolt.bolt -data=/tmp/prof.fdata -reorder-blocks=cache+ -reorder-functions=hfsort -split-functions=2 -split-all-cold -split-eh -dyno-stats
+
+
+~/Downloads/BOLT/build_server1/bin/llvm-bolt main_bolt -o main_bolt.bolt -data=/tmp/prof.fdata -reorder-blocks=cache+ -reorder-functions=hfsort -split-functions=2 -split-all-cold -split-eh -dyno-stats -jump-tables=move -align-macro-fusion=all --simplify-conditional-tail-calls --peepholes=all --hugify --icp-eliminate-loads --icf
+
+
+RESEARCH:
+=========
+Currently we are investigating time memory tradeoffs via a pollard rho implementation.
+
+Benchmarks from 12.12.22:
+Laptop:
+n,p,l
+431,1,13: old: 		37perms/s
+431,1,13: new: 		7500perms/s
+431,1,13: opt_old:  7700perms/s
+
+431,2,17: new: 		40perms/s
+431,2,17: opt_old: 	100perms/s
+
+Server
+431,2,17: new: 		182perms/s
+431,2,17: opt_old: 	450perms/s

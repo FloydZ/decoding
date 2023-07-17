@@ -4,11 +4,11 @@ import json
 import os
 import random
 import string
-import pprint
 from subprocess import Popen, PIPE, STDOUT
+from scipy.optimize import fsolve
+from scipy.special import binom as binom_sp
 
 import math
-import scipy.special as ss
 import time
 
 try:
@@ -26,10 +26,32 @@ except:
     import cleanup
     import estimate
 
+try:
+    from deps.cryptanalysislib.opt import NN_compute_optimal_params, NN_compute_time
+except Exception as e:
+    print("could not import", e)
+
+
+# At this point this is somehow the best i can think of.
+# Maybe oneday I extend this to something usefull
+optimisations = " -O3 -DNODEBUG -Wall -fopenmp -march=native"            \
+                " -ftree-vectorize -funroll-loops -fomit-frame-pointer"       \
+                " -Wno-unused-function  -Wno-unused-variable -Wno-unused-value"\
+                " -std=gnu++20 -ffast-math -ftree-vectorize -funroll-loops"\
+                " -DUSE_AVX2"
+
+gpu_optimisations = " -Xptxas -O3 -use_fast_math -extra-device-vectorization" \
+                    " -restrict -DNODEBUG -Wall -fopenmp-simd -march=native"  \
+                    " -O3 -DNODEBUG -Wall -fopenmp-simd -march=native -std=c++17 "\
+                    "--generate-code=arch=compute_75,code=[compute_75,sm_75] " \
+                    "--generate-code=arch=compute_61,code=[compute_61,sm_61] " \
+                    #"-ccbin=/usr/bin/gcc-9"
+
 
 # log_2(binom(n, k))
 def loc(n: int, k: int):
     return log2(binom(n, k))
+
 
 # cmake target to build and execute
 CMAKE_TARGET            = "main"
@@ -39,7 +61,7 @@ CMAKE_LOGGING_FILE      = "out.log"
 CMAKE_LOGGING           = True
 RUNS                    = 1
 ITERS                   = 20
-
+DEBUG = False
 
 class Cache:
     filename = "cache.txt"
@@ -80,7 +102,7 @@ def get_log_file(args):
     :param args:
     :return: the name for the log file
     """
-    s = "n"+str(args.params) + "_l"+str(args.param_l) + "_l1"+str(args.param_l1) + "_p"+str(args.param_p) + "_t" + str(args.outer_threads*args.threads) + "_bjfl" + str(args.bjmm_fulllength) + "_bjsa" + str(args.bjmm_special_alignment) + "_hm1bs" + str(args.hm1_bucketsize) + "_hm2bs" + str(args.hm2_bucketsize) + "_hm1nb" + str(args.hm1_nrbuckets) + "_hm2nb" + str(args.hm2_nrbuckets) + "qfdidoom" + str(args.quasicyclic_force_disable_doom) + "novalues" + str(args.no_values) + "highweight" + str(args.high_weight) + "hm2ett" + str(args.hm2_extendtotriple)+ "hm2full128bit" + str(args.hm2_savefull128bit)
+    s = "n"+str(args.params) + "_l"+str(args.param_l) + "_l1"+str(args.param_l1) + "_p"+str(args.param_p) + "_t" + str(args.outer_threads*args.threads) + "_bjfl" + str(args.bjmm_fulllength) + "_bjsa" + str(args.bjmm_special_alignment) + "_hm1bs" + str(args.hm1_bucketsize) + "_hm2bs" + str(args.hm2_bucketsize) + "_hm1nb" + str(args.hm1_nrbuckets) + "_hm2nb" + str(args.hm2_nrbuckets) + "qfdidoom" + str(args.quasicyclic_force_disable_doom) + "novalues" + str(args.no_values) + "highweight" + str(args.high_weight) + "hm2ett" + str(args.hm2_extendtotriple) + "hm2full128bit" + str(args.hm2_savefull128bit) + "gausc" + str(args.gaus_c) + "_cuda" + str(args.cuda)
     if CODE_TARGET == "ternary":
         s += "_tw1" + str(args.ternary_w1) + "_tw2" + str(args.ternary_w2) + "_ta" + str(args.ternary_alpha) + "_tet" + str(args.ternary_enumeration_type)
 
@@ -197,11 +219,14 @@ def estimatehmsize(k: int, l1: int, l: int, p: int, b1: int, b2: int, t=1):
 
 
 def balance_lists(n: int, k: int, l: int, l1: int, w1: int, w2: int):
-    """finds optimal r1, epsilon for a given parameter set which balances the tree"""
+    """
+    finds optimal r1, epsilon for a given parameter set which balances the tree
+    """
     min_r1, min_e = 0, 0
     min_diff = 99999999999
     epsilon = 0
     l2 = 0
+
     def diff(bsize, isize, osize):
         return abs(bsize - isize) + abs(isize - osize)
 
@@ -232,23 +257,59 @@ def wait_timeout(proc, seconds):
         time.sleep(interval)
 
 
-def rebuild(path="."):
+def rebuild(args, path="."):
     """
     run `make` in `cmake-build-release` directory to rebuild `main.cpp`
     :return: nothing
     """
-    p = Popen(["make", CMAKE_TARGET, "-j1"], stdin=PIPE, stdout=PIPE, stderr=STDOUT, close_fds=True, cwd=path+"/cmake-build-release")
+    # first clean
+    p = Popen(["make", "clean", "-j1"], stdin=PIPE, stdout=PIPE, stderr=STDOUT,
+              close_fds=True, cwd=path+"/cmake-build-release")
     p.wait()
+
+    if DEBUG:
+        text = p.stdout.read().decode("utf-8")
+        print(text)
+
+    res = optimize_binary(args)
+    estimated_permutations = res["perms"]
+
+    opt_flags = optimisations
+    if args.cuda:
+        opt_flags = gpu_optimisations
+
+    if estimated_permutations > 0:
+        opt_flags += " -DEXPECTED_PERMUTATIONS=" +\
+                     str(int(2**estimated_permutations))
+
+    # then build
+    if args.cuda:
+        p = Popen(["make", "main_cuda", "-j1",  "CUDA_FLAGS= " + opt_flags],
+                  stdin=PIPE, stdout=PIPE, stderr=STDOUT, close_fds=True,
+                  cwd=path+"/cmake-build-release")
+    else:
+        p = Popen(["make", CMAKE_TARGET, "-j1", "CXX_FLAGS= " + opt_flags],
+                  stdin=PIPE, stdout=PIPE, stderr=STDOUT, close_fds=True,
+                  cwd=path+"/cmake-build-release")
+    p.wait()
+
+    text = p.stdout.read().decode("utf-8")
     if p.returncode != 0:
-        print("ERROR Build", p.returncode, p.stdout.read().decode("utf-8"))
+        print("ERROR Build", p.returncode, text)
+
+    if DEBUG:
+        print(text)
+
     return p.returncode
 
 
 def run(seconds=0, logging=True, path="."):
     """
     runs `./main` in `cmake-build-release`
-    :param seconds: timeout seconds. After `seconds` seconds the program is killed.
-    :param logging: if set `True` all `stdout` output is parsed into `CMAKE_LOGGING_FILE` file.
+    :param seconds: timeout seconds. After `seconds` seconds the program is
+                    killed.
+    :param logging: if set `True` all `stdout` output is parsed into
+                    `CMAKE_LOGGING_FILE` file.
     :return:
     """
     start = time.time()
@@ -303,7 +364,10 @@ def write_config(args, CODE_TARGET="mceliece", bench=False):
     elif CODE_TARGET == "syndrom":
         n_file = '#include "test/decoding/challenges/' + str(args.params) + '.h"'
     elif CODE_TARGET == "ternary":
-        n_file = ternaryn2file(args.params)
+        if args.ternary_wave:
+            n_file = '#include "test/ternary/challenges/wave' + str(args.params) + 'transformed.h"'
+        else:
+            n_file = ternaryn2file(args.params)
     else:
         print("ERROR, dont know", CODE_TARGET)
         return
@@ -360,6 +424,7 @@ def write_config(args, CODE_TARGET="mceliece", bench=False):
 
         if args.loops != -1:
             f.write("#define USE_LOOPS " + str(args.loops) + "\n")
+
         if args.no_logging:
             f.write("#define NO_LOGGING " + str(args.no_logging).lower() + "\n")
 
@@ -376,6 +441,8 @@ def write_config(args, CODE_TARGET="mceliece", bench=False):
         f.write("constexpr uint32_t no_values =" + str(args.no_values) + ";\n")
         f.write("constexpr uint32_t high_weight =" + str(args.high_weight) + ";\n")
         f.write("constexpr uint32_t intermediate_target_loops =" + str(args.intermediate_target_loops) + ";\n")
+        f.write("constexpr uint32_t gaus_c =" + str(args.gaus_c) + ";\n")
+        f.write("constexpr uint32_t gaus_opt =" + str(args.gaus_opt) + ";\n")
 
         if bench:
             f.write("#define BENCHMARK 1\n")
@@ -400,6 +467,8 @@ def write_config(args, CODE_TARGET="mceliece", bench=False):
         f.write("#define USE_PRANGE " + str(PRANGE) + "\n")
         f.write("#define USE_DUMER " + str(DUMER) + "\n")
         f.write("#define USE_NN " + str(NN) + "\n")
+        f.write("#define USE_POLLARD " + str(args.pollard) + "\n")
+        f.write("#define USE_PCD " + str(args.pcs) + "\n")
 
         # for now permanently disabled
         f.write("""#define BJMM_DOOM_SPECIAL_FORM 0\n""")
@@ -470,11 +539,15 @@ def write_config(args, CODE_TARGET="mceliece", bench=False):
         f.write("constexpr uint32_t TERNARY_ENUMERATION_TYPE=" + str(args.ternary_enumeration_type) + ";\n")
 
         f.write("""
+#ifndef CUDA_MAIN
 #include "helper.h"
 #include "matrix.h"
 #include "prange.h"
 #include "dumer.h"
 #include "bjmm.h"
+#include "mo.h"
+#include "ternary.h"
+#endif
 """)
         f.write("#endif //SSLWE_CONFIG_SET")
 
@@ -588,6 +661,10 @@ def optimize_binary(args):
     :return:
     """
     def hm_size():
+        """
+
+        :return:
+        """
         pass
 
     def pollard_memoryless_version(n: int, k: int, w: int, p=1, verb=0):
@@ -597,7 +674,7 @@ def optimize_binary(args):
         :param k: code dimension
         :param w: code weight
         :param p: base weight
-        :param verb:
+        :param verb: verbose output
         :return:
         """
         solutions = max(0, log2(binom(n, w)) - (n - k))
@@ -608,37 +685,36 @@ def optimize_binary(args):
         param = []
 
         for eps in range(p):
-            D=log2(binom(k, p))
-            l=int(ceil(D))
+            D = log2(binom(k, p))
+            l = int(ceil(D))
 
-            time_perm=max(log2(binom(n,w)) -
-                          log2(binom(n-k-l, w-2*(p-eps))) -
-                          log2(binom(k, 2*(p-eps)))-solutions, 0)
+            time_perm = max(log2(binom(n,w)) -
+                            log2(binom(n-k-l, w-2*(p-eps))) -
+                            log2(binom(k, 2*(p-eps)))-solutions, 0)
 
-            reps = log2(binom(2*(p-eps),p-eps)) +\
-                   log2(binom(k-2*(p-eps),eps))
+            reps = log2(binom(2*(p-eps), p-eps)) + log2(binom(k - 2*(p-eps), eps))
 
-            match=D+D/2-reps
+            match = D+D/2-reps
 
-            if reps>D:
+            if reps > D:
                 print ("error")
 
             tmp=time_perm+log2(estimate._gaussian_elimination_complexity(n, k, r) + 2**match)
             time = min(tmp, time)
 
             if time==tmp:
-                params=[eps,l,D,reps,time_perm]
+                params=[eps, l, D, reps, time_perm]
 
         print(params)
         return time
 
     def pollard_pcs_complexity(n: int, k: int, w: int, mem=inf, memory_access=0, l_val=0, p_val=0):
         """
-        :param n:
-        :param k:
-        :param w:
-        :param p_val:
-        :param l_val:
+        :param n: code length
+        :param k: code dimension
+        :param w: error weight
+        :param p_val: if set to a value != 0 the optimizer will not change p
+        :param l_val: if set to a value != 0 the optimizer will not change l
         :return:
         """
         solutions = max(float(0), log2(binom(n, w)) - (n - k))
@@ -682,7 +758,6 @@ def optimize_binary(args):
         print(res)
         return res
 
-
     def prange_complexity(n: int, k: int, w: int, mem=inf, memory_access=0):
         """
         Complexity estimate of Prange's ISD algorithm
@@ -721,7 +796,7 @@ def optimize_binary(args):
         print(res)
         return res
 
-    def dumer_complexity(n: int, k: int, w: int, mem=inf, memory_access=0, hmap=1, val_l=0, val_p=0):
+    def dumer_complexity(n: int, k: int, w: int, mem=inf, memory_access=0, hmap=1, val_l=0, val_p=0, gaus_c=0):
         """
         Complexity estimate of Dumer's ISD algorithm
         [Dum91] Dumer, I.:  On minimum distance decoding of linear codes. In: Proc. 5th Joint
@@ -766,8 +841,13 @@ def optimize_binary(args):
                     tmp_mem = log2(2 * L1 + estimate._mem_matrix(n, k, r))
                     if tmp_mem > mem:
                         continue
-
-                    Tp = max(log2(binom(n, w)) - log2(binom(n - k - l, w - 2 * p)) - log2(binom(k1, p) ** 2) - solutions, 0.)
+                    
+                    if gaus_c:
+                        Tp = estimate.marcovchain_number_perms(n, k, w, gaus_c, p, l)
+                    else:
+                        Tp = max(log2(binom(n, w)) - log2(binom(n - k - l, w - 2 * p)) - log2(binom(k1, p) ** 2) - solutions, 0.)
+                    
+                    #Tp = max(log2(binom(n, w)) - log2(binom(n - k, w - 2 * p)) - log2(binom(k1, p) ** 2) - solutions, 0.)
                     Tg = estimate._gaussian_elimination_complexity(n, k, r)
                     tmp = Tp + log2(Tg + estimate._list_merge_complexity(L1, l, hmap))
 
@@ -791,7 +871,7 @@ def optimize_binary(args):
         print(res)
         return res
 
-    def bjmm_depth_2_complexity(n: int, k: int, w: int, mem=inf, memory_access=0, hmap=1, val_l=0, val_l1=0, val_p=0, mmt=0):
+    def bjmm_depth_2_complexity(n: int, k: int, w: int, mem=inf, memory_access=0, hmap=1, val_l=0, val_l1=0, val_p=0, mmt=0, qc=0, fulllength=0, gaus_c=0):
         """
         Complexity estimate of BJMM algorithm in depth 2
         [MMT11] May, A., Meurer, A., Thomae, E.: Decoding random linear codes in  2^(0.054n). In: International Conference
@@ -819,57 +899,105 @@ def optimize_binary(args):
         memory = 0
         r = estimate._optimize_m4ri(n, k, mem)
 
-        i_val = [35, 500, 35]
+        i_val = [35, 450, 25]
         i_val_inc = [10, 10, 10]
         params = [-1 for _ in range(3)]
+
+        org_algo = False
+
         while True:
             stop = True
-            for p in range(max(params[0] - i_val_inc[0] // 2, 0), min(w // 2, i_val[0]), 2):
+            for p in range(max(params[0] - i_val_inc[0] // 2,2*qc), min(w // 2, i_val[0]), 2):
                 #if val_p and p != val_p:
                 #    continue
                 for l in range(max(params[1] - i_val_inc[1] // 2, 0), min(n - k - (w - 2 * p), min(i_val[1], n - k))):
                     if val_l and l != val_l:
                         continue
 
-                    for p1 in range(max(params[2] - i_val_inc[2] // 2, (p + 1) // 2), min(w, i_val[2])):
+                    for p1 in range(max(params[2] - i_val_inc[2] // 2, (p + 1) // 2, qc), min(w, i_val[2])):
                         if mmt and p1 != p // 2:
                             continue
+
                         if val_p and p1 != val_p:
                             continue
 
+                        if fulllength and p1 != 1:
+                            continue
+
                         k1 = (k + l) // 2
-                        L1 = binom(k1, p1)
+                        L1 = binom(k1, p1) * (1 + fulllength)
                         if log2(L1) > time:
                             continue
 
+                        if qc:
+                            L1b = binom(k1, p1-1) * k
+
                         if k1 - p < p1 - p / 2:
                             continue
-                        reps = (binom(p, p//2) * binom(k1 - p, p1 - p//2))**2
 
-                        l1 = int(ceil(log2(reps)))
+                        if qc == 0:
+                            if fulllength == 0:
+                                reps = (binom(p, p//2) * binom(k1 - p, p1 - p//2))**2
+                            else:
+                                reps = 6
+                        else:
+                            if fulllength == 0:
+                                reps = binom(p, p // 2) * binom(k1 - p, p1 - p // 2)*binom(k1 - p+1, p1 - p // 2)
+                                if p-1 > p // 2:
+                                    reps *= (binom(p-1, p // 2))
+                            else:
+                                reps = 3
 
-                        if l1 > l:
-                            continue
+                        l1_start = int(ceil(log2(reps)))
+                        for l1 in range(l1_start, l1_start+20):
+                            #if l1 > l:
+                            #    continue
+                            if val_l1 != 0  and l1 != val_l1:
+                                continue
 
-                        L12 = max(1, L1**2 // 2**l1)
+                            if org_algo and l1 != int(ceil(log2(reps))):
+                                continue
 
-                        tmp_mem = log2((2 * L1 + L12) + estimate._mem_matrix(n, k, r))
-                        if tmp_mem > mem:
-                            continue
+                            L12 = max(1, L1**2 // 2**l1)
 
-                        Tp = max(log2(binom(n, w)) - log2(binom(n - k - l, w - 2 * p)) - 2 * log2(binom((k + l) // 2, p)) - solutions, 0)
-                        Tg = estimate._gaussian_elimination_complexity(n, k, r)
-                        T_tree = 2 * estimate._list_merge_complexity(L1, l1, hmap) + estimate._list_merge_complexity(L12, l - l1, hmap)
-                        T_rep = int(ceil(2 ** (l1 - log2(reps))))
+                            qc_advantage = 0
+                            if qc:
+                                L12b = max(1, L1*L1b//2**l1)
+                                qc_advantage=log2(k)
 
-                        tmp = Tp + log2(Tg + T_rep * T_tree)
-                        tmp += estimate.__memory_access_cost(tmp_mem, memory_access)
+                            #tmp_mem = log2((2 * L1 + L12) + estimate._mem_matrix(n, k, r))
+                            tmp_mem = log2((2 * L1 + L12) + estimate._mem_matrix(n, k, r)) if not(qc) else log2(L1+L1b + min(L12,L12b) + estimate._mem_matrix(n, k, r))
+                            if tmp_mem > mem:
+                                continue
 
-                        time = min(tmp, time)
-                        if tmp == time:
-                            memory = tmp_mem
-                            params = [p, l, p1, l1, Tp, log2(reps)]
-                            lists = [log2(L1), log2(L12)]
+                            #Tp = max(log2(binom(n, w)) - log2(binom(n - k - l, w - 2 * p)) - 2 * log2(binom((k + l) // 2, p)) - solutions, 0)
+                            if fulllength == 0:
+                                # TODO auch für halflength impl
+                                if gaus_c:
+                                    Tp = estimate.marcovchain_number_perms(n, k, w, gaus_c, p, l)
+                                else:
+                                    Tp = max(log2(binom(n, w)) - log2(binom(n - k - l, w - 2 * p + qc)) - log2(binom(k1, p))-log2(binom(k1, p -qc)) - qc_advantage - solutions, 0)
+                            else:
+                                Tp = max(log2(binom(n, w)) - log2(binom(n - k - l, w - 2 * p + qc)) - log2(binom(k+l, 2*p - qc)) - qc_advantage - solutions, 0)
+
+                            Tg = estimate._gaussian_elimination_complexity(n, k, r)
+                            if qc == 0:
+                                T_tree = 2 * estimate._list_merge_complexity(L1, l1, hmap) + estimate._list_merge_complexity(L12, l - l1, hmap)
+                            else:
+                                T_tree =  estimate._list_merge_async_complexity(L1,L1b,l1,hmap) \
+                                          + estimate._list_merge_complexity(L1,l1, hmap) \
+                                          + estimate._list_merge_async_complexity(L12,L12b, l-l1, hmap)
+
+                            T_rep = int(ceil(2 ** (l1 - log2(reps))))
+
+                            tmp = Tp + log2(Tg + T_rep * T_tree)
+                            tmp += estimate.__memory_access_cost(tmp_mem, memory_access)
+
+                            time = min(tmp, time)
+                            if tmp == time:
+                                memory = tmp_mem
+                                params = [p, l, p1, l1, Tp, log2(reps), T_rep]
+                                lists = [log2(L1), log2(L12)]
 
             for i in range(len(i_val)):
                 if params[i] == i_val[i] - 1:
@@ -879,9 +1007,8 @@ def optimize_binary(args):
             if stop:
                 break
 
-
-        par = {"l": params[1], "l1": params[3], "p": params[0], "p1": params[2], "depth": 2, "perms": params[4], "reps": params[5], "lists:": lists}
-        res = {"time": time, "memory": memory, "parameters": par}
+        par = {"l": params[1], "l1": params[3], "p": params[0], "p1": params[2], "depth": 2, "perms": params[4], "reps": params[5], "lists:": lists, "T_reps": params[6]}
+        res = {"time": time, "memory": memory, "perms": params[4], "parameters": par}
         print(par)
         print(res)
         return res
@@ -893,8 +1020,7 @@ def optimize_binary(args):
         [MayOze15] May, A. and Ozerov, I.: On computing nearest neighbors with applications to decoding of binary linear codes.
         In: Annual International Conference on the Theory and Applications of Cryptographic Techniques. pp. 203--228. Springer (2015)
 
-        expected weight distribution::
-
+        expected weight distribution:
             +-------------------------+---------------------+---------------------+
             | <-----+ n - k - l+----->|<--+ (k + l) / 2 +-->|<--+ (k + l) / 2 +-->|
             |           w - 2p        |        p            |        p            |
@@ -997,15 +1123,21 @@ def optimize_binary(args):
         print(res)
         return res
 
-    def esser_bellini_depth_2_complexity(n: int, k: int, w: int, mem=inf, memory_access=0, hmap=1, val_l1=0, val_l2=0, val_p=0, val_p1=1, val_p2=1):
+    def may_ozerov_depth_2_complexity_noim(n: int, k: int, w: int, mem=inf, memory_access=0, hmap=1, val_l=0, val_p=0):
         """
-        Complexity estimate of Esser Bellini algorithm in depth 2
-        expected weight distribution::
+        Complexity estimate of May-Ozerov algorithm in depth 2 NOT using
+        Indyk-Motwani for NN search
 
-            +-------------------------+---------------------+---------------------+------------+
-            | <-----+ n - k - l1+---->|<--+ (k + l1) / 2 +->|<--+ (k + l) / 2 +-->|<--+ l2 +-->|
-            |    w - 4p - p1 - p2     |          p          |        p            |   p1+p2    |
-            +-------------------------+---------------------+---------------------+------------+
+        [MayOze15] May, A. and Ozerov, I.: On computing nearest neighbors with
+        applications to decoding of binary linear codes.
+        In: Annual International Conference on the Theory and Applications of
+        Cryptographic Techniques. pp. 203--228. Springer (2015)
+
+        expected weight distribution:
+            +-------------------------+---------------------+---------------------+
+            | <-----+ n - k - l+----->|<--+ (k + l) / 2 +-->|<--+ (k + l) / 2 +-->|
+            |           w - 2p        |        p            |        p            |
+            +-------------------------+---------------------+---------------------+
 
         INPUT:
         - ``n`` -- length of the code
@@ -1013,17 +1145,229 @@ def optimize_binary(args):
         - ``w`` -- Hamming weight of error vector
         - ``mem`` -- upper bound on the available memory (as log2), default unlimited
         - ``hmap`` -- indicates if hashmap is being used (default: true)
-        - ``memory_access`` -- specifies the memory access cost model (default: 0, choices: 0 - constant, 1 - logarithmic, 2 - square-root, 3 - cube-root or deploy custom function which takes as input the logarithm of the total memory usage)
+        - ``memory_access`` -- specifies the memory access cost model 
+                        (default: 0, choices: 
+                         0 - constant, 
+                         1 - logarithmic, 
+                         2 - square-root, 
+                         3 - cube-root 
+                         or deploy custom function which takes as input the
+                                logarithm of the total memory usage)
         """
-        l1 = val_l1
-        l2 = val_l2
-        p1 = val_p1
-        p2 = val_p2
-        p = val_p
-        perms = log2(binom(n, w) / (binom(n-k-l1, w-4*p-p1-p2) * binom((k+l1)//2, 2*p)**2 * binom(l2, p1+p2) ))
-        print(perms, 2**perms)
+        solutions = max(0., log2(binom(n, w)) - (n - k))
+        time = inf
+        memory = 0
+        r = estimate._optimize_m4ri(n, k, mem)
+        l_reps = False
+
+        i_val = [30, 300, 25]
+        i_val_inc = [10, 10, 10]
+        params = [-1 for _ in range(3)]
+        perms = 0
+        iterations_IM = 0
+        lam_IM = 0
+        lists = []
+        while True:
+            stop = True
+            for p in range(max(params[0] - i_val_inc[0]//2, 0), min(w // 2, i_val[0]), 2):
+                for l in range(max(params[1] - i_val_inc[1]//2, 0), min(n - k - (w - 2 * p), i_val[1])):
+                    for p1 in range(max(params[2] - i_val_inc[2]//2, (p + 1)//2), min(w, i_val[2])):
+                        if val_p and p1 != val_p:
+                            continue
+                        if val_l and l != val_l:
+                            continue
+                        k1 = (k + l) // 2
+                        reps = (binom(p, p // 2) * binom(k1 - p, p1 - p // 2)) ** 2
+
+                        # if the `l_reps` configuration is set, hardcode l to the number of represenentations
+                        # and do not let it choose freely
+                        if l_reps:
+                            l = reps
+
+                        L1 = binom(k1, p1)
+
+                        # early exit
+                        if log2(L1) > time:
+                            continue
+
+                        L12 = L1 ** 2 // 2 ** l
+                        L12 = max(L12, 1)
+                        tmp_mem = log2((2 * L1 + L12) + estimate._mem_matrix(n, k, r))
+                        if tmp_mem > mem:
+                            continue
+
+                        # number of permutations
+                        Tp = log2(binom(n, w)) - log2(binom(n-k-l, w-2*p)) - 2 * log2(binom(k1, p)) - solutions + max(0, l-reps)
+
+                        # number of additional loops needed if we match on more coordinates
+                        # than we have representations.
+                        T_rep = int(ceil(2 ** max(l - log2(reps) + min(Tp, 0), 0)))
+
+                        # cost for the gaussian elimination
+                        Tg = estimate._gaussian_elimination_complexity(n, k, r)
+
+                        # cost of the NN
+                        r, N, d, kk = NN_compute_optimal_params(n-k-l, L12, w-p)
+                        if r == -1:
+                            continue
+
+                        d = int(d)
+                        r = int(r)
+                        kk = int(kk)
+                        nn_time = NN_compute_time(n, L12, w, r, N, d)
+                        nn_time = 2**nn_time
+
+                        #im_time = estimate._indyk_motwani_complexity(L12, n-k-l, w-2*p, hmap)
+                        #print(nn_time, im_time)
+                    
+                        T_tree = 2 * estimate._list_merge_complexity(L1, l, hmap) + \
+                                     nn_time
+                        memory = tmp_mem
+
+                        Tp = max(Tp, 0)
+                        tmp = Tp + log2(Tg + T_rep * T_tree)
+                        tmp += estimate.__memory_access_cost(tmp_mem, memory_access)
+                        time = min(tmp, time)
+
+                        if tmp == time:
+                            params = [p, l, p1, log2(reps), N, r, kk, d]
+                            lists = [log2(L1), log2(L12), 1]
+                            perms = Tp + log2(T_rep)
+
+            for i in range(len(i_val)):
+                if params[i] >= i_val[i] - i_val_inc[i] / 2:
+                    i_val[i] += i_val_inc[i]
+                    stop = False
+            if stop:
+                break
+            break
+
+        par = {"l": params[1], "p": params[0], "p1": params[2], "depth": 2, "N": params[4], "r": params[5], "k": params[6], "d": params[7], "reps": params[3]}
+        res = {"time": time, "memory": memory, "perms": perms, "lists": lists, "parameters": par}
+        print(par)
+        print(res)
+        return res
+
+    def esser_bellini_depth_2_complexity(n: int, k: int, w: int, mem=inf, memory_access=0, hmap=1, val_l1=0, val_l2=0, val_p=0, val_p1=1, val_p2=1):
+        """
+        Complexity estimate of BJMM algorithm in depth 2 using partially disjoint weight, applying explicit MitM-NN search on second level
+        [MMT11] May, A., Meurer, A., Thomae, E.: Decoding random linear codes in  2^(0.054n). In: International Conference
+        on the Theory and Application of Cryptology and Information Security. pp. 107–124. Springer (2011)
+        [BJMM12] Becker, A., Joux, A., May, A., Meurer, A.: Decoding random binary linear codes in 2^(n/20): How 1+ 1= 0
+        improves information set decoding. In: Annual international conference on the theory and applications of
+        cryptographic techniques. pp. 520–536. Springer (2012)
+        [EssBel21] Esser, A. and Bellini, E.: Syndrome Decoding Estimator. In: IACR Cryptol. ePrint Arch. 2021 (2021), 1243
+        expected weight distribution::
+            +--------------------------+--------------------+--------------------+--------+--------+
+            | <-+ n - k - l1 - 2 l2 +->|<-+ (k + l1) / 2 +->|<-+ (k + l1) / 2 +->|   l2   |   l2   |
+            |       w - 2 p - 2 w2     |         p          |         p          |   w2   |   w2   |
+            +--------------------------+--------------------+--------------------+--------+--------+
+        INPUT:
+        - ``n`` -- length of the code
+        - ``k`` -- dimension of the code
+        - ``w`` -- Hamming weight of error vector
+        - ``mem`` -- upper bound on the available memory (as log2), default unlimited
+        - ``hmap`` -- indicates if hashmap is being used (default: true)
+        - ``memory_access`` -- specifies the memory access cost model (default: 0, choices: 0 - constant, 1 - logarithmic, 2 - square-root, 3 - cube-root or deploy custom function which takes as input the logarithm of the total memory usage)
+        EXAMPLES::
+            >>> from .estimator import bjmm_depth_2_partially_disjoint_weight_complexity
+            >>> bjmm_depth_2_partially_disjoint_weight_complexity(n=100,k=50,w=10) # doctest: +SKIP
+        """
+        solutions = max(0, log2(binom(n, w)) - (n - k))
+        time = inf
+        memory = 0
+        r = estimate._optimize_m4ri(n, k, mem)
+
+        i_val = [30, 25, 5]
+        i_val_inc = [10, 10, 10, 10, 10]
+        params = [-1 for _ in range(5)]
+        while True:
+            stop = True
+            for p in range(max(params[0] - i_val_inc[0] // 2, 0), min(w // 2, i_val[0]), 2):
+                for p1 in range(max(params[1] - i_val_inc[1] // 2, (p + 1) // 2), min(w, i_val[1])):
+                    if p1_val and p1 != p1_val:
+                        continue
+
+                    for w2 in range(max(params[2] - i_val_inc[2] // 2, 0), min(w - p1, i_val[2])):
+                        if p2_val and w2 != p2_val:
+                            continue
+                        
+                        #############################################################################################
+                        ######choose start value for l1 close to the logarithm of the number of representations######
+                        #############################################################################################
+                        try:
+                            f = lambda x: log2((binom(p, p // 2) * binom_sp((k + x) / 2 - p, p1 - p // 2))) * 2 - x
+                            l1_val = int(fsolve(f, 0)[0])
+                        except:
+                            continue
+                        if f(l1_val) < 0 or f(l1_val) > 1:
+                            continue
+                            #############################################################################################
+
+                        for l1 in range(max(0, l1_val - i_val_inc[3] // 2), l1_val + i_val_inc[3] // 2):
+                            k1 = (k + l1) // 2
+                            reps = (binom(p, p // 2) * binom(k1 - p, p1 - p // 2)) ** 2
+
+                            L1 = binom(k1, p1)
+                            if log2(L1) > time:
+                                continue
+
+                            L12 = L1 ** 2 // 2 ** l1
+                            L12 = max(L12, 1)
+                            tmp_mem = log2((2 * L1 + L12) + estimate._mem_matrix(n, k, r))
+                            if tmp_mem > mem:
+                                continue
+
+                            #################################################################################
+                            #######choose start value for l2 such that resultlist size is close to L12#######
+                            #################################################################################
+                            try:
+                                f = lambda x: math.log2(int(L12)) + int(2) * math.log2(binom_sp(x, int(w2))) - int(2) * x
+                                l2_val = int(fsolve(f, 0)[0])
+                            except Exception as e:
+                                print("except", e)
+                                continue
+                            if f(l2_val) < 0 or f(l2_val) > 1:
+                                continue
+
+                            ################################################################################
+                            l2_min = w2
+                            l2_max = (n - k - l1 - (w - 2 * p - 2 * w2)) // 2
+                            l2_range = [l2_val - i_val_inc[4] // 2, l2_val + i_val_inc[4] // 2]
+                            for l2 in range(max(l2_min, l2_range[0]), min(l2_max, l2_range[1])):
+                                Tp = max(
+                                    log2(binom(n, w)) - log2(binom(n - k - l1 - 2 * l2, w - 2 * p - 2 * w2)) - 2 * log2(
+                                        binom(k1, p)) - 2 * log2(binom(l2, w2)) - solutions, 0)
+                                Tg = estimate._gaussian_elimination_complexity(n, k, r)
+
+                                T_tree = 2 * estimate._list_merge_complexity(L1, l1, hmap) + estimate._mitm_nn_complexity(L12, 2 * l2, 2 * w2,
+                                                                                                        hmap)
+                                T_rep = int(ceil(2 ** max(l1 - log2(reps), 0)))
+
+                                tmp = Tp + log2(Tg + T_rep * T_tree)
+                                tmp += estimate.__memory_access_cost(tmp_mem, memory_access)
+
+                                time = min(tmp, time)
+
+                                if tmp == time:
+                                    memory = tmp_mem
+                                    params = [p, p1, w2, l2, l1]
+
+            for i in range(len(i_val)):
+                if params[i] >= i_val[i] - i_val_inc[i] / 2:
+                    i_val[i] += i_val_inc[i]
+                    stop = False
+            if stop:
+                break
+            break
+
+        par = {"l1": params[4], "p": params[0], "p1": params[1], "depth": 2, "l2": params[3], "w2": params[2]}
+        res = {"time": time, "memory": memory, "parameters": par}
+        print(res)
+        return res
 
     n = args.params
+    qc = 0
     # note that we subtract +1 from k to simulate the parity row we added
     if CODE_TARGET == "lowweight":
         k = ceil(0.5 * args.params) - 1
@@ -1034,6 +1378,13 @@ def optimize_binary(args):
     elif CODE_TARGET == "quasicyclic":
         k = floor(0.5*n) - 1
         w = int(sqrt(n-2))
+        qc = 1
+    elif CODE_TARGET == "syndrom":
+        k = floor(0.5*n) - 1
+        w = 68
+    else:
+        print("ERROR", CODE_TARGET, "UNKNOWN")
+        return
 
     l_val, l1_val, p_val, mem = 0, 0, 0, inf
     if args.param_l:
@@ -1044,29 +1395,36 @@ def optimize_binary(args):
         p_val = args.param_p
     if args.memory:
         mem = args.memory
+
     if args.mo:
         lam_val = args.mo_hm
         l2_val = args.mo_l2
-        print(n, k, w, l_val, l1_val, l2_val, lam_val)
+        print("mo", n, k, w, l_val, l1_val, l2_val, lam_val)
         may_ozerov_depth_2_complexity(n, k, w, mem, 0, True, lam_val, l_val, l2_val, p_val)
+    elif args.monoim:
+        print("monoim", n, k, w, l_val, l1_val)
+        may_ozerov_depth_2_complexity_noim(n, k, w, mem, 0, True, l_val, p_val)
     elif args.eb:
         l2_val = args.mo_l2
         p1_val = args.eb_p1
         p2_val = args.eb_p2
-        print(n, k, w, l_val, l1_val, l2_val, p1_val, p2_val)
-        esser_bellini_depth_2_complexity(n, k, w, mem, 0, True, l1_val, l2_val, p_val, p1_val, p2_val)
+        print("eb", n, k, w, l_val, l1_val, l2_val, p1_val, p2_val)
+        return esser_bellini_depth_2_complexity(n, k, w, mem, 0, 1, l1_val, l2_val, p_val, p1_val, p2_val)
     elif args.prange:
-        print(n, k, w)
-        prange_complexity(n, k, w, mem, 0)
+        print("prange", n, k, w)
+        return prange_complexity(n, k, w, mem, 0)
     elif args.dumer:
-        print(n, k, w, l_val, p_val)
-        dumer_complexity(n, k, w, mem, 0, True, l_val, p_val)
+        print("dumer", n, k, w, l_val, p_val)
+        return dumer_complexity(n, k, w, mem, 0, True, l_val, p_val, args.gaus_c)
     elif args.pollard:
-        print(n, k, w, l_val, p_val)
-        pollard_pcs_complexity(n, k, w, mem, 0, l_val, p_val)
+        print("pollard", n, k, w, l_val, p_val)
+        return pollard_memoryless_version(n, k, w, mem, 0, l_val, p_val)
+    elif args.pcs:
+        print("pcs", n, k, w, l_val, p_val)
+        return pollard_pcs_complexity(n, k, w, mem, 0, l_val, p_val)
     else:
-        print(n, k, w, mem, l_val, l1_val, p_val)
-        bjmm_depth_2_complexity(n, k, w, mem, 0, True, l_val, l1_val, p_val, 0)
+        print("bjmm", n, k, w, mem, l_val, l1_val, p_val, qc)
+        return bjmm_depth_2_complexity(n, k, w, mem, 0, True, l_val, l1_val, p_val, 0, qc, args.bjmm_fulllength, args.gaus_c)
 
 
 def optimize_ternary(args):
@@ -1122,7 +1480,7 @@ def optimize_ternary(args):
         :param n: instance parameter
         :param k: instance parameter
         :param w: instance parameter
-        :param hm: if set to true it will also calculate the ouint64_t ptimal hashmap paramters
+        :param hm: if set to true it will also calculate the optimal hashmap parameters
         :param enumerationtype: 0 only w1,w2
                                 1 <= w1, w2
         :param max_mem: mem limitation
@@ -1201,20 +1559,19 @@ def optimize_ternary(args):
                             if mem > max_mem:
                                 continue
 
-                            T = max(L1, L2, L) + max(0, l1 * log2(3) - R) + max(0, perms-solutions)
+                            T = max(L1, L2, L) + max(0., l1 * log2(3) - R) + max(0., perms-solutions)
                             tmp = estimate.__memory_access_cost(mem, mem_cost)
                             T = max(T, T+tmp)
 
                             if T < mini[0] or (T == mini[0] and mini[1] > max(L1, L2, L)):
                                 mini = [T, max(L1, L2, L)]
                                 lists = [L1, L2, L]
-                                params = {"l": l, "l1": l1, "a": a, "b": b, "w_a": w1, "w_b": w2, "lists:": lists, "perms": max(perms-solutions, 0)+max(l1*log2(3)-R,0), "enumerationtype": enumerationtype, "T": T}
+                                params = {"l": l, "l1": l1, "a": a, "b": b, "w_a": w1, "w_b": w2, "lists:": lists, "perms": max(perms-solutions, 0), "inter_perms": max(l1*log2(3)-R, 0), "enumerationtype": enumerationtype, "T": T}
                                 verbose = [perms, solutions, R, remaining, l1*log2(3) - R]
 
                                 if hm:
                                     params["HM1NRBuckets"], params["HM1BucketSize"] = hm_params(L1, l1)
                                     params["HM2NRBuckets"], params["HM2BucketSize"] = hm_params(L2, l-l1)
-
 
         print(params)
         print(verbose)
@@ -1308,15 +1665,15 @@ if __name__ == "__main__":
     parser.add_argument('--target_flag', help='run target with the flag', default="", type=str, required=False)
     parser.add_argument('--log_file', help='log to file', default="", type=str, required=False)
     parser.add_argument('--include_file', help='challenge file', default="", type=str, required=False)
-    parser.add_argument('--shell_logging', help='Instead of logging everything to a file, it will be shown on stdout', action='store_true')
-    parser.add_argument('--no_logging', help='Disable most of the internal logging of the algorithms.', action='store_true')
+    parser.add_argument('-z', '--shell_logging', help='Instead of logging everything to a file, it will be shown on stdout', action='store_true')
+    parser.add_argument('--no_logging', help='Disable all of the internal logging of the algorithms, except the final error found', action='store_true')
     parser.add_argument('--print_loops', help='print every X loops some status information.', default=10000, type=int, required=False)
     parser.add_argument('--exit_loops', help='check every X loops, if another thread is already finished', default=10000, type=int, required=False)
     parser.add_argument('--benchmark', help='sets BENCHMARK', action='store_true')
     parser.add_argument('--challenge', help='sets CHALLENGE', action='store_true')
     parser.add_argument('--optimize', help='opimize the given parameter set', action='store_true')
 
-    parser.add_argument('-m', '--memory', help='maximim memory allowed, this is only used in', default=inf, type=int, required=False)
+    parser.add_argument('-m', '--memory', help='maximum memory allowed, this is only used in', default=inf, type=int, required=False)
     parser.add_argument('--calc_loops', help='returns loops', action='store_true')
     parser.add_argument('--lph', help='TODO', default=1., type=float, required=False)
 
@@ -1331,6 +1688,8 @@ if __name__ == "__main__":
 
     parser.add_argument('--quasicyclic_force_disable_doom', help='disables doom even if QC is active.', action='store_true')
     parser.add_argument('--intermediate_target_loops', help='disables doom even if QC is active.', default=1, type=int, required=False)
+    parser.add_argument('--gaus_c', help='Number of columns to swap in the permutation phase. If set to zero a random permutation is choosen.', default=0, type=int, required=False)
+    parser.add_argument('--gaus_opt', help='Enables an optimizes gaussian elimination step, which which tracks with unity vectors are permuted.', default=1, type=int, required=False)
 
     parser.add_argument('-t' , '--threads', help='number of openmp the algorithm can use to parallelize the tree. -1 means all available.', default=1, type=int, required=False)
     parser.add_argument('--outer_threads', help='number of openmp threads to parallelize the permutations.', default=1, type=int, required=False)
@@ -1349,7 +1708,6 @@ if __name__ == "__main__":
     parser.add_argument('--hm2_nrbuckets', help='Number of buckets in the second hashmap. log scale. Should be always =l-l1 if you want speed.', default=0, type=int, required=False)
     parser.add_argument('--bjmm_special_alignment', help='Forces every avx2 instruction to be an aligned instruction. Can break stuff.', action='store_true', required=False)
     parser.add_argument('--bjmm_fulllength', help='Not really used. Instead id an MITM manner enumerate the baselists on full length.', action='store_true', required=False)
-    parser.add_argument('--force_early_exit', help='Instead if recomputing the label from the baselists, check first 128 bit in the Hashmaps. Only used in the high memory case, otherwise the memory consumption is to high to fit the hms in the cache.', action='store_true', required=False)
 
     parser.add_argument('--hm1_stdbinarysearch', help='if set to True: std::lower_bound will be used in the hashmap, else a custom mono bounded implementation is used.', default=1, type=int, required=False)
     parser.add_argument('--hm2_stdbinarysearch', help='same as the hm1 variant', default=1, type=int, required=False)
@@ -1384,8 +1742,10 @@ if __name__ == "__main__":
     parser.add_argument('--ternary_alpha', help='Size of the MITM part. must be divisable by 8 currently', default=-1, type=int, required=False)
     parser.add_argument('--ternary_filter2', help='Maximum number of twos allowed in the the last lvl of the tree in the value (n-k-l part).', default=1, type=int, required=False)
     parser.add_argument('--ternary_enumeration_type', help='0 = only the weight, 1 = enumerate the weight', default=-1, type=int, required=False)
+    parser.add_argument('--ternary_wave', help='if set, wave challenges are used.', default=-1, type=int, required=False)
 
     # some additional May Ozerov or generic NN parameters.
+    parser.add_argument('--monoim', help='Instead of BJMM use MO.', action='store_true')
     parser.add_argument('--mo', help='Instead of BJMM use MO. Only valid for ME/QC/LW and not for T', action='store_true')
     parser.add_argument('--mo_hm', help='number of additional hashmaps to be used in the NN search.', default=0, type=int, required=False)
     parser.add_argument('--mo_l2', help='size of NN Search windows per hashmap', default=0, type=int, required=False)
@@ -1401,7 +1761,11 @@ if __name__ == "__main__":
     parser.add_argument('--prange', help='Run Pranges algorithm instead of BJMM', action='store_true')
     parser.add_argument('--dumer', help='Run Dumers algorithm instead of BJMM', action='store_true')
     parser.add_argument('--pollard', help='Run pollard parallel collision search algorithm instead of BJMM', action='store_true')
+    parser.add_argument('--pcs', help='Run parallel collision search algorithm instead of BJMM', action='store_true')
 
+    # some cuda
+    parser.add_argument('--cuda', help='activate the cuda code',
+                        action='store_true')
 
     # old and unused, maybe reactivate them:
     #parser.add_argument('-w1', '--param_w1', help='w1 parameter. Weight on the l1/1 coordinates. In QuasiCyclic Setting this is the weight param. Also in lowWeight Setting', default=0, type=int, required=False)
@@ -1453,12 +1817,16 @@ if __name__ == "__main__":
     else:
         CMAKE_LOGGING_FILE = args.log_file
 
+    print("Build Starting")
     if CMAKE_TARGET_DIR == "":
         write_config(args, CODE_TARGET)
 
-    if rebuild() != 0:
+    if rebuild(args) != 0:
         print("ERROR Build")
         exit()
+
+    if args.cuda:
+        CMAKE_TARGET = "main_cuda"
 
     print("Build Finished")
     print("running:", CMAKE_LOGGING_FILE)

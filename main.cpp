@@ -1,7 +1,8 @@
 #include "main.h"
 
 #include <time.h>
-#include <sys/resource.h>
+#include <sys/resource.h>	// getpid linux
+#include <unistd.h>			// getpid apple
 #include <random>
 
 
@@ -40,6 +41,7 @@ int main(int argc, char** argv) {
 	// randomly see the internal prng.
 	random_seed(given_tid + distribution(generator) + time(NULL));
 
+	const uint32_t seed = 0;
 	bool already_printed = false;
 	uint64_t loops_sum = 0;
 	double SumTime = (double)clock();
@@ -59,7 +61,7 @@ int main(int argc, char** argv) {
 
 #if TERNARY != 0
 	static constexpr ListIteration listIters = TERNARY_ENUMERATION_TYPE == 0 ? SinglePartialSingle : EnumSinglePartialSingle;
-	static constexpr ConfigMMTTernary MMTconfig(n, k, G_w/2, G_p, G_l, G_l1, HM1_NRB, HM2_NRB, HM1_SIZEB, HM2_SIZEB, TERNARY_NR1, TERNARY_NR2, TERNARY_FILTER2, k+G_l-TERNARY_ALPHA, listIters);
+	static constexpr ConfigMMTTernary MMTconfig(n, k, G_w/2, G_p, G_l, G_l1, HM1_NRB, HM2_NRB, HM1_SIZEB, HM2_SIZEB, TERNARY_NR1, TERNARY_NR2, TERNARY_FILTER2, k+G_l-TERNARY_ALPHA, listIters, NUMBER_THREADS, intermediate_target_loops);
 	using MatrixType = TernaryMMT<MMTconfig>::Matrix;
 
 	MatrixType AT(n-k, n, h);
@@ -80,9 +82,10 @@ int main(int argc, char** argv) {
 #else
 	constexpr uint32_t weight_thresh = G_w-addweightthresh;
 	constexpr uint32_t mo_l = USE_MO ? G_l1 : G_l;
-	static constexpr ConfigBJMM config(n, k, G_w, G_p, G_l, G_l1, HM1_SIZEB, HM2_SIZEB, HM1_NRB, HM2_NRB, weight_thresh, NUMBER_THREADS, NUMBER_OUTER_THREADS, USE_DOOM, FULLLENGTH, CUTOFF, LOW_WEIGHT, MO_l2, MO_NRHM, ifactor, no_values, HM1_USESTDBINARYSEARCH, HM2_USESTDBINARYSEARCH, HM1_USEINTERPOLATIONSEARCH, HM2_USEINTERPOLATIONSEARCH, HM1_USELINEARSEARCH, HM2_USELINEARSEARCH, HM1_USELOAD, HM2_USELOAD, HM1_SAVEFULL128BIT, HM2_SAVEFULL128BIT, HM1_EXTENDTOTRIPLE, HM2_EXTENDTOTRIPLE, HM1_USEPREFETCH, HM2_USEPREFETCH, HM1_USEATOMICLOAD, HM2_USEATOMICLOAD, HM1_USEPACKED, HM2_USEPACKED, high_weight);
+	static constexpr ConfigBJMM config(n, k, G_w, G_p, mo_l, G_l1, HM1_SIZEB, HM2_SIZEB, HM1_NRB, HM2_NRB, weight_thresh, NUMBER_THREADS, NUMBER_OUTER_THREADS, USE_DOOM, FULLLENGTH, CUTOFF, LOW_WEIGHT, MO_l2, MO_NRHM, ifactor, no_values, HM1_USESTDBINARYSEARCH, HM2_USESTDBINARYSEARCH, HM1_USEINTERPOLATIONSEARCH, HM2_USEINTERPOLATIONSEARCH, HM1_USELINEARSEARCH, HM2_USELINEARSEARCH, HM1_USELOAD, HM2_USELOAD, HM1_SAVEFULL128BIT, HM2_SAVEFULL128BIT, HM1_EXTENDTOTRIPLE, HM2_EXTENDTOTRIPLE, HM1_USEPREFETCH, HM2_USEPREFETCH, HM1_USEATOMICLOAD, HM2_USEATOMICLOAD, HM1_USEPACKED, HM2_USEPACKED, high_weight, intermediate_target_loops, seed, gaus_c, gaus_opt);
 #endif
 
+#if TERNARY == 0
 	mzd_t *AT = mzd_from_str(n, n-k, h);
 	mzd_t *A = mzd_transpose(NULL, AT);
 	mzd_t *ss;
@@ -94,8 +97,7 @@ int main(int argc, char** argv) {
 
 	mzd_t *ee = mzd_init(1, n);
 	mzd_t *ee_T = mzd_init(n, 1);
-
-
+#endif
 
 #if NUMBER_OUTER_THREADS > 1
 #pragma omp parallel default(none) shared(std::cout, ee, ss, A, ee_T, given_tid, loops_sum, finished, already_printed) num_threads(NUMBER_OUTER_THREADS)
@@ -114,6 +116,8 @@ int main(int argc, char** argv) {
 		BJMMNN<config> *obj         = new BJMMNN<config>(ee, ss, A, e_tid);
 #elif USE_MO != 0
 		MO<config> *obj             = new MO<config>(ee, ss, A, e_tid);
+#elif USE_BE != 0
+		EsserBellini<config> *obj   = new EsserBellini<config>(ee, ss, A, e_tid);
 #elif USE_PRANGE != 0
 		Prange<config> *obj         = new Prange<config>(ee, ss, A, e_tid);
 #elif USE_DUMER != 0
@@ -138,7 +142,18 @@ int main(int argc, char** argv) {
 				already_printed = true;
 
 				const double lph = NUMBER_OUTER_THREADS * double(3600.) * double(r) / time2;
-				std::cout << "Found outer tid:" << omp_get_thread_num() << ", e_tid: " << e_tid << " found solution, time: " << time2 << ", round: " << r << " loops/h:" << lph << "\n";
+				std::cout << "Found outer tid:" << omp_get_thread_num() << ", e_tid: " << e_tid << " found solution, time: " << time2 << ", round: " << r << " loops/h:" << lph;
+
+
+#ifdef EXPECTED_PERMUTATIONS
+				const __uint128_t frac = __uint128_t(EXPECTED_PERMUTATIONS)/__uint128_t(loops_sum);
+				const __uint128_t frac_time128 = frac * time;
+				const uint64_t frac_time = uint64_t(frac_time128);
+				std::cout << ", exptime: " << frac_time << "s";
+				// printf("%f\n", EXPECTED_PERMUTATIONS);
+#endif
+				std::cout << "\n";
+
 #if TERNARY
 				ee.print();
 				MatrixType::InternalRowType::sub(ee.__data[0], ee.__data[0], ee_T.__data[0]);
@@ -147,7 +162,7 @@ int main(int argc, char** argv) {
 				FILE *f = fopen("solution.txt","a");
 				mzd_fprint(f, ee);
 				fprintf(f, "%lf s\n", time2);
-				fprintf(f, "%lu iters\n", r);
+				fprintf(f, "%llu iters\n", r);
 				fprintf(f, "%lf loops/h\n", lph);
 
 				if constexpr(LOW_WEIGHT) {
@@ -164,7 +179,7 @@ int main(int argc, char** argv) {
 	const double ttime = ((double)clock() - SumTime)/CLOCKS_PER_SEC;
 	std::cout << "Finished: SUMTime: " << ttime << ", SUMLoops: " << loops_sum << ":" << loops_sum/NUMBER_OUTER_THREADS << "\n" << std::flush;
 	FILE *f = fopen("solution.txt","a");
-	fprintf(f, "loops_sum: %lu\n", loops_sum);
+	fprintf(f, "loops_sum: %llu\n", loops_sum);
 	fclose(f);
 #endif
 
