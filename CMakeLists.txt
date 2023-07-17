@@ -37,7 +37,9 @@ add_custom_target (
         COMMAND ${CMAKE_SOURCE_DIR}/setup.sh
 )
 
-find_package(OpenMP REQUIRED)
+#find_package(OpenMP REQUIRED)
+include_directories(/usr/local/opt/libomp/include)
+link_directories(/usr/local/opt/libomp/lib)
 
 # some helper variables
 # possible values are: [-DVALUE_KARY, -DVALUE_BINARY]
@@ -67,8 +69,8 @@ if(APPLE)
     link_directories(/opt/homebrew/lib)
 
     set(ADDITIONAL_FLAGS "-DUSE_ARM")
-    set(DEBUG_FLAGS "-g -Og -DDEBUG ${OpenMP_CXX_FLAGS} ${ALLOWED_WARNINGS} ${VALUE_FLAG} ${SANITIZER_FLAGS} ${ADDITIONAL_FLAGS}")
-    set(OPTIMIZE_FLAGS "-O3 -flto -DNDEBUG -fno-exceptions ${OpenMP_CXX_FLAGS} ${ALLOWED_WARNINGS} ${VALUE_FLAG} ${SANITIZE_FLAG} ${ADDITIONAL_FLAGS}")
+    set(DEBUG_FLAGS "-g -Og -DDEBUG -fopenmp ${ALLOWED_WARNINGS} ${VALUE_FLAG} ${SANITIZER_FLAGS} ${ADDITIONAL_FLAGS}")
+    set(OPTIMIZE_FLAGS "-O3 -flto -DNDEBUG -fno-exceptions -fopenmp ${ALLOWED_WARNINGS} ${VALUE_FLAG} ${SANITIZE_FLAG} ${ADDITIONAL_FLAGS}")
 else()
     #set(ADDITIONAL_FLAGS "-DUSE_AVX2  -fno-inline")
     #set(ADDITIONAL_FLAGS "-DUSE_AVX2 -Werror=dangling-reference")
@@ -76,8 +78,8 @@ else()
 
     set(AVX512_FLAGS "-DUSE_AVX512 -mavx512f -mavx512dq  -mavx512bf16 -mavx512cd  -mavx512bw -mavx512vl -mavx512vbmi -mavx512ifma -mavx512vbmi2 -mavx512vnni -mavx512bitalg -mavx512vpopcntdq")
     set(AVX2_FLAGS "-DUSE_AVX2 -mavx2 -mavx -mbmi -mbmi2")
-	set(DEBUG_FLAGS "-g -O0 -DDEBUG -Wall -Wpedantic -pedantic -march=native ${OpenMP_CXX_FLAGS} ${AVX2_FLAGS} ${AVX512_FLAGS} ${ALLOWED_WARNINGS} ${VALUE_FLAG} ${SANITIZER_FLAGS} ${ADDITIONAL_FLAGS}")
-	set(OPTIMIZE_FLAGS "-g -march=native -mavx2 -mavx -mbmi2 -O3 -flto -DNDEBUG ${OpenMP_CXX_FLAGS} -ffast-math -ftree-vectorize -funroll-loops -fno-exceptions ${AVX2_FLAGS} ${AVX512_FLAGS} ${ALLOWED_WARNINGS} ${VALUE_FLAG} ${SANITIZE_FLAGS} ${ADDITIONAL_FLAGS}")
+	set(DEBUG_FLAGS "-g -O0 -DDEBUG -Wall -Wpedantic -pedantic -march=native -fopenmp ${AVX2_FLAGS} ${AVX512_FLAGS} ${ALLOWED_WARNINGS} ${VALUE_FLAG} ${SANITIZER_FLAGS} ${ADDITIONAL_FLAGS}")
+	set(OPTIMIZE_FLAGS "-g -march=native -mavx2 -mavx -mbmi2 -O3 -flto -DNDEBUG -fopenmp -ffast-math -ftree-vectorize -funroll-loops -fno-exceptions ${AVX2_FLAGS} ${AVX512_FLAGS} ${ALLOWED_WARNINGS} ${VALUE_FLAG} ${SANITIZE_FLAGS} ${ADDITIONAL_FLAGS}")
 endif()
 
 if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
@@ -117,15 +119,15 @@ else()
 endif()
 
 # set openmp
-if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
-        if ( CMAKE_CXX_COMPILER_ID STREQUAL "clang")
-                set(DEBUG_FLAGS "${DEBUG_FLAGS} -Xclang -fopenmp")
-                set(OPTIMIZE_FLAGS "${OPTIMIZE_FLAGS}  -Xclang -fopenmp")
-        endif()
-else()
-        set(DEBUG_FLAGS "${DEBUG_FLAGS} -fopenmp")
-        set(OPTIMIZE_FLAGS "${OPTIMIZE_FLAGS} -fopenmp")
-endif()
+#if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+#        if ( CMAKE_CXX_COMPILER_ID STREQUAL "clang")
+#                set(DEBUG_FLAGS "${DEBUG_FLAGS} -Xclang -fopenmp")
+#                set(OPTIMIZE_FLAGS "${OPTIMIZE_FLAGS}  -Xclang -fopenmp")
+#        endif()
+#else()
+#        set(DEBUG_FLAGS "${DEBUG_FLAGS} -fopenmp")
+#        set(OPTIMIZE_FLAGS "${OPTIMIZE_FLAGS} -fopenmp")
+#endif()
 
 # Set additionally our own debug/optimisation compiler/linkage flags. Maybe not he nicest way, but by far the easiest.
 set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} ${DEBUG_FLAGS}")
@@ -171,14 +173,14 @@ check_language(CUDA)
 if(CMAKE_CUDA_COMPILER)
         enable_language(CUDA)
 
-        ExternalProject_Add(nvbench_project
-                SOURCE_DIR        ${CMAKE_SOURCE_DIR}/deps/nvbench
-                CONFIGURE_COMMAND cd <SOURCE_DIR> && git checkout ff50759 && mkdir -p build
-                COMMAND           cd <SOURCE_DIR> && cd build/ && cmake -DCMAKE_CUDA_ARCHITECTURES=60 -DCUDA_ARCHITECTURES=60-real -DNVBench_ENABLE_CUPTI=ON ..
-                BUILD_COMMAND     cd <SOURCE_DIR> && cd build/ && make -j8
-                INSTALL_COMMAND   ""
-                TEST_COMMAND      ""
-                )
+		#ExternalProject_Add(nvbench_project
+        #        SOURCE_DIR        ${CMAKE_SOURCE_DIR}/deps/nvbench
+        #        CONFIGURE_COMMAND cd <SOURCE_DIR> && git checkout ff50759 && mkdir -p build
+        #        COMMAND           cd <SOURCE_DIR> && cd build/ && cmake -DCMAKE_CUDA_ARCHITECTURES=60 -DCUDA_ARCHITECTURES=60-real -DNVBench_ENABLE_CUPTI=ON ..
+        #        BUILD_COMMAND     cd <SOURCE_DIR> && cd build/ && make -j8
+        #        INSTALL_COMMAND   ""
+        #        TEST_COMMAND      ""
+        #        )
 
         # global include path for dependencies
         # maybe a little ugly, but the easiest way to include `cuda_runtime.h`
@@ -213,16 +215,16 @@ if(CMAKE_CUDA_COMPILER)
         #endif()
 
         # this is needed to get the libary created
-        add_subdirectory(deps/nvbench)
+		#add_subdirectory(deps/nvbench)
         #add_executable(test_cuda tests/test_cuda.cu)
         #target_link_libraries(test_cuda ${LINK_TEST_FLAGS} fplll m4ri gmpxx gmp)
 
 
-		add_executable(main_cuda main.cu)
-		target_link_libraries(main_cuda m4ri)
+		#add_executable(main_cuda main.cu)
+		#target_link_libraries(main_cuda m4ri)
 		# target_compile_options(main_cuda PUBLIC -march=native -O3 -ccbin=/usr/bin/gcc-9 --resource-usage -use_fast_math -extra-device-vectorization -restrict -Xptxas -O3 ${COMPILE_TEST_FLAGS})
 		# target_compile_options(main_cuda PUBLIC -march=native -O3 --resource-usage -use_fast_math -extra-device-vectorization -restrict -Xptxas -O3 ${COMPILE_TEST_FLAGS})
-        target_compile_options(main_cuda PUBLIC -march=native -O3 ${COMPILE_TEST_FLAGS})
+		#target_compile_options(main_cuda PUBLIC -march=native -O3 ${COMPILE_TEST_FLAGS})
         #target_compile_options(main_cuda PUBLIC -G -g -DDEBUG  ${COMPILE_TEST_FLAGS})
 endif()
 
