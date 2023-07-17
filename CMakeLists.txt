@@ -93,7 +93,7 @@ set(COMPILE_TEST_FLAGS -g)
 #set(LINK_TEST_FLAGS -lgtest -pthread gmp gmpxx m4ri m png -fopenmp -Xlinker --emit-relocs )
 set(LINK_TEST_FLAGS -lgtest -pthread gmp gmpxx m4ri m png -lomp)
 if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
-        set(LINK_TEST_FLAGS -lgtest -lgtest_main -pthread gmp gmpxx m png m4ri.a )
+        set(LINK_TEST_FLAGS -lgtest -lgtest_main -pthread gmp gmpxx m png m4ri.a -lomp)
 endif()
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
