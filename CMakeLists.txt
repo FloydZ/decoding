@@ -40,6 +40,10 @@ add_custom_target (
 #find_package(OpenMP REQUIRED)
 include_directories(/usr/local/opt/libomp/include)
 link_directories(/usr/local/opt/libomp/lib)
+link_directories(/usr/local/lib)
+link_directories(/usr/local/lib/libomp)
+link_directories(/usr/local/libomp)
+link_directories(/usr/lib)
 
 # some helper variables
 # possible values are: [-DVALUE_KARY, -DVALUE_BINARY]
