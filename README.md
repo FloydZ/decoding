@@ -81,7 +81,7 @@ Important: You need a C++20 rdy compiler. For our records we used `clang++-13-rc
 
 ```bash
 # its important to name the build directory `cmake-build-release`. Its hardcoded in some file... yeah i know, its a todo
-git clone --recurse-submodules -j4 git@git.noc.ruhr-uni-bochum.de:cits/decoding.git
+git clone --recurse-submodules -j4 https://github.com/FloydZ/decoding.git
 cd decoding && mkdir cmake-build-release && cd cmake-build-release && cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang .. && cd ..
 chmod +x setup.sh
 ./setup.sh
