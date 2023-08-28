@@ -80,7 +80,7 @@ else()
     #set(ADDITIONAL_FLAGS "-DUSE_AVX2 -Werror=dangling-reference")
     set(ADDITIONAL_FLAGS "-DUSE_AVX2")
 
-    set(AVX512_FLAGS "-DUSE_AVX512 -mavx512f -mavx512dq  -mavx512bf16 -mavx512cd  -mavx512bw -mavx512vl -mavx512vbmi -mavx512ifma -mavx512vbmi2 -mavx512vnni -mavx512bitalg -mavx512vpopcntdq")
+	#set(AVX512_FLAGS "-DUSE_AVX512 -mavx512f -mavx512dq  -mavx512bf16 -mavx512cd  -mavx512bw -mavx512vl -mavx512vbmi -mavx512ifma -mavx512vbmi2 -mavx512vnni -mavx512bitalg -mavx512vpopcntdq")
     set(AVX2_FLAGS "-DUSE_AVX2 -mavx2 -mavx -mbmi -mbmi2")
 	set(DEBUG_FLAGS "-g -O0 -DDEBUG -Wall -Wpedantic -pedantic -march=native -fopenmp ${AVX2_FLAGS} ${AVX512_FLAGS} ${ALLOWED_WARNINGS} ${VALUE_FLAG} ${SANITIZER_FLAGS} ${ADDITIONAL_FLAGS}")
 	set(OPTIMIZE_FLAGS "-g -march=native -mavx2 -mavx -mbmi2 -O3 -flto -DNDEBUG -fopenmp -ffast-math -ftree-vectorize -funroll-loops -fno-exceptions ${AVX2_FLAGS} ${AVX512_FLAGS} ${ALLOWED_WARNINGS} ${VALUE_FLAG} ${SANITIZE_FLAGS} ${ADDITIONAL_FLAGS}")
