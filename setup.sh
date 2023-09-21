@@ -1,6 +1,7 @@
 git submodule sync
 git submodule update --init
 cd deps/cryptanalysislib
+git checkout 4d3fd5da85b301d08bee25f21eb9fc5d00312253
 git submodule sync
 git submodule update --init
 cd deps/m4ri

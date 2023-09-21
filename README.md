@@ -1,4 +1,5 @@
 This is the implementation of the [paper](https://eprint.iacr.org/2021/1634) and our second [paper](https://eprint.iacr.org/2022/1329).
+NOTE: make sure that [cryptanalysislis](https://github.com/FloydZ/cryptanalysislib) is on [this](https://github.com/FloydZ/cryptanalysislib/commit/4d3fd5da85b301d08bee25f21eb9fc5d00312253) branch.
 
 Requirements
 ----
