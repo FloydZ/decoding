@@ -119,16 +119,7 @@ if(lto_supported AND USE_LTO)
   set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
 endif()
 
-set(ALLOWED_WARNINGS "
-	-Wno-c99-designator 
-	-Wno-invalid-constexpr 
-	-Wno-unused-function 
-	-Wno-unused-local-typedef 
-	-Wno-overlength-strings 
-	-Wno-unknown-pragmas 
-	-Wno-unused-variable 
-	-Wno-unused-local-typedefs"
-)
+set(ALLOWED_WARNINGS "	-Wno-c99-designator -Wno-invalid-constexpr -Wno-unused-function -Wno-unused-local-typedef -Wno-overlength-strings -Wno-unknown-pragmas -Wno-unused-variable -Wno-unused-local-typedefs")
 
 message(STATUS "System Processor: ${CMAKE_SYSTEM_PROCESSOR}")
 
