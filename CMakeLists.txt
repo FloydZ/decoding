@@ -252,8 +252,12 @@ link_directories("deps/cryptanalysislib/build")
 link_directories("deps/cryptanalysislib/deps/m4ri/.libs")
 link_directories("/usr/local/lib")
 
-add_subdirectory(test)
-add_subdirectory(bench)
+if (benchmark_FOUND)
+	add_subdirectory(bench)
+endif()
+if (GTest_FOUND)
+	add_subdirectory(tests)
+endif()
 
 add_custom_target(
     TOUCH
