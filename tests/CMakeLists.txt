@@ -1,11 +1,10 @@
-#TESTS Flags
 file(GLOB TEST_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp)
 foreach(testfile ${TEST_SOURCES})
     file(RELATIVE_PATH filename ${CMAKE_CURRENT_SOURCE_DIR} ${testfile})
     string(REPLACE ".cpp" "" file ${filename})
     add_executable(${file} ${testfile})
-    target_link_libraries(${file} ${LINK_TEST_FLAGS})
-    add_test(AllTests ${file})
+	target_link_libraries(${file} ${LINK_TEST_FLAGS})
+	add_test(AllTests ${file})
 endforeach(testfile ${TEST_SOURCES})
 
 if(USE_CUDA)
@@ -16,9 +15,9 @@ if(USE_CUDA)
 endif()
 
 
-#TODO add_subdirectory(decoding)
-add_subdirectory(mceliece)
+# TODO add_subdirectory(decoding)
+#add_subdirectory(mceliece)
 # TODO not implemented add_subdirectory(quasicyclic)
-#TODO add_subdirectory(lowweight)
+# TODO add_subdirectory(lowweight)
 # TODO currently not implemented add_subdirectory(ternary)
 # TODO add_subdirectory(fq)

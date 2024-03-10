@@ -80,6 +80,19 @@ or just run:
 pip install -r requirements.txt
 ```
 
+Build:
+=======
+
+```bash
+git clone --recurse-submodules https://github.com/FloydZ/decoding
+mkdir build
+cd build
+cmake ../ 
+make -j8
+```
+
+
+
 Reproduction of Results EC'22 and EC'23:
 ========================================
 

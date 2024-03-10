@@ -48,7 +48,7 @@ ExternalProject_Add(cryptanalysislib_project
 )
 
 
-include("deps/cmake_optimize_for_architecture/HostOptimizations.cmake")
+include("deps/cryptanalysislib/deps/cmake_optimize_for_architecture/HostOptimizations.cmake")
 
 check_cxx_compiler_flag(-march=native COMPILER_SUPPORTS_MARCH_NATIVE)
 check_cxx_compiler_flag(-fno-inline COMPILER_SUPPORTS_NO_INLINE)
@@ -252,9 +252,10 @@ link_directories("deps/cryptanalysislib/build")
 link_directories("deps/cryptanalysislib/deps/m4ri/.libs")
 link_directories("/usr/local/lib")
 
-if (benchmark_FOUND)
-	add_subdirectory(bench)
-endif()
+#TODO 
+# if (benchmark_FOUND)
+# 	add_subdirectory(bench)
+# endif()
 if (GTest_FOUND)
 	add_subdirectory(tests)
 endif()
@@ -272,10 +273,9 @@ add_custom_target (
 
 
 # add the main target running our main algorithm
-add_executable(main main.cpp)
-target_link_libraries(main ${LINK_TEST_FLAGS})
+#TODO add_executable(main main.cpp)
+# target_link_libraries(main ${LINK_TEST_FLAGS})
 
-set(USE_PROFILE "0")
 if(USE_PROFILE)
 	add_executable(main_analysis1 main.cpp)
 	target_link_libraries(main_analysis1 ${LINK_TEST_FLAGS} -fprofile-instr-generate=code.profraw)

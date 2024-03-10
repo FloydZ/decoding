@@ -33,6 +33,6 @@ stdenv.mkDerivation {
    	pprof
    	valgrind
    	massif-visualizer
-   	cudatoolkit
+    #TODO cudatoolkit
   ]));
 }
