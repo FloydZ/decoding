@@ -390,7 +390,7 @@ class CollisionHashMap {
 
 public:
 	constexpr CollisionHashMap(const l_type *lHT, HashMap *hm, cle *cL = nullptr) noexcept :
-	    lHT(lHT), lHTr(lHT + n_half - config.epsilon), hm(hm), cL(cL) {
+		cL(cL), hm(hm),  lHT(lHT), lHTr(lHT + n_half - config.epsilon) {
 	}
 
 	///

@@ -130,10 +130,10 @@ public:
 	Permutation P{config.n};
 
 	/// changelist stuff
+	chase<(config.k+config.l)/2 + config.epsilon, config.p, config.q> c{};
 	using cle = std::pair<uint16_t, uint16_t>;
 	const size_t list_size = c.list_size();
 	std::vector<cle> cL;
-	chase<(config.k+config.l)/2 + config.epsilon, config.p, config.q> c{};
 
 	/// not constant values.
 	const double ghz = std::max(osfreq(), 1.); // just to make sure we are not dividing by zero
@@ -145,7 +145,7 @@ public:
 	static_assert(config.epsilon <= ((config.l+config.k)/2));
 	static_assert(config.l < (config.n-config.k));
 
-	constexpr ISDInstance(bool use_changelist=false)  noexcept  : c(){
+	constexpr ISDInstance(bool use_changelist=false) noexcept : c(){
 		/// warn the user if the internal datastructures are
 		/// not using a optimized arithmetic
 		if constexpr (!Label::optimized()) {

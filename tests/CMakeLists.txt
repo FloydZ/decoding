@@ -16,7 +16,7 @@ endif()
 
 
 # TODO add_subdirectory(decoding)
-#add_subdirectory(mceliece)
+add_subdirectory(mceliece)
 # TODO not implemented add_subdirectory(quasicyclic)
 # TODO add_subdirectory(lowweight)
 # TODO currently not implemented add_subdirectory(ternary)

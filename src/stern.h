@@ -226,7 +226,7 @@ public:
 			biject_simd<baselist_enumeration_length, p>(right, rows2);
 
 			// ignore special case for lowest limb
-			uint32x8_t wt{0};
+			uint32x8_t wt{};
 			int wt_ = 0;
 
 			#pragma unroll
@@ -332,6 +332,7 @@ public:
 			auto f = [&, this](const l_type a1, const l_type a2,
 			                   const uint16_t *index1, const uint16_t *index2,
 			                   const uint32_t nr_cols) __attribute__((always_inline)) -> bool {
+				(void)nr_cols;
 				if constexpr (!SternCollType) {
 					ASSERT(bEnum->check_hashmap2(syndrome, index1, 2 * p, l));
 					const l_type a = a1 ^ a2;
