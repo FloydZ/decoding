@@ -17,9 +17,8 @@ using namespace cryptanalysislib;
 
 struct ConfigStern : public ConfigISD {
 public:
-
 	// number of elements per bucket in the hashmap
-	const uint32_t HM_bucketsize = 0;
+	const uint32_t HM_bucketsize = bc((k+l)/2, p) >> l;
 
 	// number of elements which can be contained in the last list.
 	// this is only a tmp storage, after this many elements were added
@@ -55,6 +54,10 @@ public:
 	constexpr static uint32_t p = config.p;
 	constexpr static uint32_t l = config.l;
 	constexpr static uint32_t q = config.q;
+
+	static_assert(p > 0);
+	static_assert(l > 0);
+	static_assert(config.HM_bucketsize > 0);
 
 	using ISD = ISDInstance<uint64_t, isd>;
 	using Error 		= ISD::Error;

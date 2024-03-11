@@ -10,20 +10,20 @@ Currently the following algorithms are implemented on CPU:
 - MMT/BJMM (F2/Fq)
 - May-Ozerov (F2)
 
-The Nearest-Neighbor subroutine see the [cryptanalysislib](https://github.com/FloydZ/cryptanalysislib).
+For the Nearest-Neighbor subroutine see the [cryptanalysislib](https://github.com/FloydZ/cryptanalysislib).
 
 Requirements:
 =============
 
-Arch Linux:
------------
+Note: `google-benchmark` is not really needed.
+
+### Arch Linux:
 
 ```bash
 sudo pacman -S cmake make clang gtest benchmark
 ```
 
-Ubuntu 22.04:
--------------
+### Ubuntu 22.04:
 
 ```bash
 sudo apt install make cmake libomp-dev clang libgtest-dev googlebenchmark
@@ -31,11 +31,10 @@ sudo apt install make cmake libomp-dev clang libgtest-dev googlebenchmark
 Note: only Ubuntu 22.04 is supported, all older version specially Ubuntu 20.04
 is not supported.
 
-MacOS:
-------
+### MacOS:
 
 ```bash
-brew insatll cmake make oogletest libomp llvm google-benchmark
+brew install cmake make googletest libomp llvm google-benchmark
 ```
 
 You need to have llvm first in your PATH, run:
@@ -49,24 +48,19 @@ export LDFLAGS="-L/usr/local/opt/llvm/lib"
 export CPPFLAGS="-I/usr/local/opt/llvm/include"
 ```
 
-## NixOS
+### NixOS
+
 The installation on `nixos` is super easy:
 ```bash
 nix-shell
-mkdir build
-cd build
-cmake ..
-make
 ```
 
-Windows:
---------
+### Windows:
 
 You probably want to reevaluate some life decisions.
 
 
-Python:
--------
+### Python:
 
 If you want to use the `python3` interface you need the following packages:
 
@@ -91,6 +85,63 @@ cmake ../
 make -j8
 ```
 
+Usage:
+======
+
+#C++ API:
+
+You will find a lot of examples in the [test](./tests) folder. Here a little 
+example how to use `Sterns` algorithm
+```c
+#include "tests/mceliece/challenges/mce431.h"
+#include "stern.h"
+
+static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=2,.l=13,.c=0,.threads=1};
+static constexpr ConfigStern config{isdConfig, .HM_bucketsize=16};
+
+Stern<isdConfig, config> stern{};
+stern.from_string(h, s);
+stern.run();
+assert(stern.correct());
+```
+
+All Implemented algorithms inherit from a base class called `ISD`. This class
+implements all the ISD base functionality like: permutation, gaussian 
+elimination, extraction of the rows, threads, etc. Thus we first need to
+initialize the configuration for this class with:
+```c 
+static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=2,.l=13,.c=0,.threads=1};
+```
+
+Next the configuration of Sterns algorithms is initialized. Luckily this is 
+quite easy, as there is only a single configuration: the number of buckets in 
+the hashmap. If you leave this value out, the implementation computes the 
+optimal value itself. NOTE: this can lead to alignment issues.
+
+Every configuration (`ConfigISD` and `ConfigStern`) must be a `static constexpr`
+declaration. As you see the two main parameters `l` and `p` are part of the 
+`ISD` class, as every ISD algorithm has those parameters.
+
+After this the main class for Stern is initialized via:
+```c    
+Stern<isdConfig, config> stern{};
+```
+
+Now you can either pass the needed parity check matrix via 
+```c
+stern.from_string(h, s);
+```
+
+see [here](./tests/mceliece/challenges/mce431.h) for an example of how the 
+strings should look like. Or you can generate a random instance via:
+```c
+stern.random();
+```
+
+And finally the algorithm is started via:
+```c
+stern.run();
+```
 
 
 Reproduction of Results EC'22 and EC'23:

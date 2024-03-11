@@ -39,9 +39,6 @@ jobs:
         /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
         brew install libomp llvm googletest google-benchmark
 
-        #     - name: Install Google Benchmark
-        #       run: git clone --depth=1 --single-branch --branch v1.8.3 https://github.com/google/benchmark.git benchmark && mkdir -p benchmark/build && cd ./benchmark/build &&  cmake -DCMAKE_BUILD_TYPE=Release -DBENCHMARK_ENABLE_GTEST_TESTS=OFF ../ && make -j
-
     - name: Configure CMake
       run: cmake -B ${{github.workspace}}/build -D CMAKE_CXX_COMPILER=$(brew --prefix llvm)/bin/clang++
 

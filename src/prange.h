@@ -25,6 +25,9 @@ public:
 	constexpr static uint32_t l = isd.l;
 	constexpr static uint32_t q = isd.q;
 
+	static_assert(l == 0);
+	static_assert(p == 0);
+
 	using ISD = ISDInstance<uint64_t, isd>;
 	using PCMatrixOrg 	= ISD::PCMatrixOrg;
 	using PCMatrixOrg_T = ISD::PCMatrixOrg_T;
