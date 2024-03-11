@@ -247,10 +247,15 @@ public:
 	// generate a random instance
 	constexpr void random() noexcept {
 		A.random();
-		A.gaus();
+		uint32_t rank = A.gaus();
+		ASSERT(rank > 0);
+
 		e.random_row_with_weight(0, config.w);
 		PCMatrixOrg::mul_transposed(s, A, e);
 		PCMatrix::augment(wA, A, s);
+
+		e.print();
+		std::cout << "this is the solution vector" << std::endl;
 	}
 
 	constexpr void compute_changelist() noexcept {
@@ -294,7 +299,7 @@ public:
 		}
 
 		if constexpr (swap) {
-			// otherwise it doesnt make any sense
+			// otherwise it doesn't make any sense
 			static_assert(sub);
 			swap_matrix();
 		}

@@ -49,7 +49,7 @@ TEST(SternIM, t640t1p2) {
 
 TEST(SternMO, t640t1p2) {
 	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=2,.l=19,.c=0,.threads=1};
-	static constexpr ConfigSternMO config{isdConfig, .r=2, .N=1000, .dk=15, .nnk=64};
+	static constexpr ConfigSternMO config{isdConfig, .r=4, .N=20, .dk=14, .nnk=32};
 
 	SternMO<isdConfig, config> stern{};
 	stern.from_string(h, s);

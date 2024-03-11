@@ -69,21 +69,21 @@ find_package(benchmark)
 find_package(Git QUIET)
 
 # init the submodules
-if(GIT_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
-    execute_process(COMMAND ${GIT_EXECUTABLE} submodule sync
-                    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                    RESULT_VARIABLE GIT_SUBMOD_RESULT)
-    if(NOT GIT_SUBMOD_RESULT EQUAL "0")
-        message(FATAL_ERROR "git submodule update sync failed with ${GIT_SUBMOD_RESULT}, please checkout submodules")
-    endif()
-
-    execute_process(COMMAND ${GIT_EXECUTABLE} submodule update --init --recursive
-                    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                    RESULT_VARIABLE GIT_SUBMOD_RESULT)
-    if(NOT GIT_SUBMOD_RESULT EQUAL "0")
-        message(FATAL_ERROR "git submodule update --init --recursive failed with ${GIT_SUBMOD_RESULT}, please checkout submodules")
-    endif()
-endif()
+#if(GIT_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
+#    execute_process(COMMAND ${GIT_EXECUTABLE} submodule sync
+#                    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+#                    RESULT_VARIABLE GIT_SUBMOD_RESULT)
+#    if(NOT GIT_SUBMOD_RESULT EQUAL "0")
+#        message(FATAL_ERROR "git submodule update sync failed with ${GIT_SUBMOD_RESULT}, please checkout submodules")
+#    endif()
+#
+#    execute_process(COMMAND ${GIT_EXECUTABLE} submodule update --init --recursive
+#                    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+#                    RESULT_VARIABLE GIT_SUBMOD_RESULT)
+#    if(NOT GIT_SUBMOD_RESULT EQUAL "0")
+#        message(FATAL_ERROR "git submodule update --init --recursive failed with ${GIT_SUBMOD_RESULT}, please checkout submodules")
+#    endif()
+#endif()
 
 # global include directories
 include_directories("deps/b63/include/b63")
@@ -119,7 +119,7 @@ if(lto_supported AND USE_LTO)
   set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
 endif()
 
-set(ALLOWED_WARNINGS " -Wno-c99-designator -Wno-invalid-constexpr -Wno-unused-function")
+set(ALLOWED_WARNINGS " -Wno-c99-designator -Wno-invalid-constexpr -Wno-unused-function -Wno-zero-length-array")
 
 message(STATUS "System Processor: ${CMAKE_SYSTEM_PROCESSOR}")
 
