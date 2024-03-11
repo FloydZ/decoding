@@ -54,10 +54,16 @@ public:
 	constexpr T data() const noexcept {
 		return 0u;
 	}
+
+	/// NOTE: this container drops the `data` value
+	/// \tparam strive
+	/// \param data
+	/// \param index
+	/// \return
 	template<const uint32_t strive=1>
 	constexpr static __FORCEINLINE__ SternCollisionType create(const T data,
 	                                             const index_type *index) noexcept {
-
+		(void) data;
 		static_assert(strive > 0);
 		SternCollisionType ret;
 		if constexpr (strive == 1) {
@@ -501,7 +507,7 @@ public:
 		for (size_t right_index_ = start; right_index_ + 8 < end;
 				right_index_+=8) {
 			biject_simd<enumeration_length, p>(right_index, rows);
-			uint32x8_t tmp{};
+			uint32x8_t tmp = uint32x8_t::set1(iT);
 
 			// compute the limb
 			#pragma unroll

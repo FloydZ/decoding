@@ -37,7 +37,7 @@ TEST(Stern, t640t1p2c20) {
 }
 
 TEST(SternIM, t640t1p2) {
-	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=2,.l=17,.c=0,.threads=1};
+	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=2,.l=19,.c=0,.threads=1};
 	static constexpr ConfigStern configStern{isdConfig, .HM_bucketsize=16};
 	static constexpr ConfigSternIM config{isdConfig, .nr_views=2};
 
@@ -48,8 +48,8 @@ TEST(SternIM, t640t1p2) {
 }
 
 TEST(SternMO, t640t1p2) {
-	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=2,.l=17,.c=0,.threads=1};
-	static constexpr ConfigSternMO config{isdConfig, .nr_views=2};
+	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=2,.l=19,.c=0,.threads=1};
+	static constexpr ConfigSternMO config{isdConfig, .r=2, .N=1000, .dk=15, .nnk=64};
 
 	SternMO<isdConfig, config> stern{};
 	stern.from_string(h, s);

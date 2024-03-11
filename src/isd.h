@@ -159,7 +159,10 @@ public:
 		}
 	}
 
-	virtual ~ISDInstance() {};
+	virtual ~ISDInstance() {
+	     periodic_print();
+	};
+
 	virtual void info() const noexcept {};
 
 

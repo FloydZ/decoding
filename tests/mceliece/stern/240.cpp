@@ -57,26 +57,6 @@ TEST(SternIM, t240c20) {
 	EXPECT_EQ(stern.correct(), true);
 }
 
-TEST(SternMO, t240) {
-	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=1,.l=10,.c=0,.threads=1};
-	static constexpr ConfigSternMO config{isdConfig, .nr_views=2};
-
-	SternMO<isdConfig, config> stern{};
-	stern.from_string(h, s);
-	stern.run();
-	EXPECT_EQ(stern.correct(), true);
-}
-
-TEST(SternMO, t240c20) {
-	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=1,.l=10,.c=20,.threads=1};
-	static constexpr ConfigSternMO config{isdConfig, .nr_views=2};
-
-	SternMO<isdConfig, config> stern{};
-	stern.from_string(h, s);
-	stern.run();
-	EXPECT_EQ(stern.correct(), true);
-}
-
 int main(int argc, char **argv) {
 	InitGoogleTest(&argc, argv);
 	srand(time(NULL));

@@ -37,9 +37,9 @@ TEST(Stern, t431t1p2c20) {
 }
 
 TEST(SternIM, t431t1p2) {
-	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=2,.l=13,.c=0,.threads=1};
+	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=2,.l=17,.c=0,.threads=1};
 	static constexpr ConfigStern configStern{isdConfig, .HM_bucketsize=16};
-	static constexpr ConfigSternIM config{isdConfig, .nr_views=2};
+	static constexpr ConfigSternIM config{isdConfig, .nr_views=3};
 
 	SternIM<isdConfig, configStern, config> stern{};
 	stern.from_string(h, s);
@@ -47,15 +47,27 @@ TEST(SternIM, t431t1p2) {
 	EXPECT_EQ(stern.correct(), true);
 }
 
-TEST(SternMO, t431t1p2) {
-	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=2,.l=10,.c=0,.threads=1};
-	static constexpr ConfigSternMO config{isdConfig, .nr_views=2};
+TEST(SternIM, t431t1p2c20) {
+	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=2,.l=19,.c=20,.threads=1};
+	static constexpr ConfigStern configStern{isdConfig, .HM_bucketsize=16};
+	static constexpr ConfigSternIM config{isdConfig, .nr_views=3};
 
-	SternMO<isdConfig, config> stern{};
+	SternIM<isdConfig, configStern, config> stern{};
 	stern.from_string(h, s);
 	stern.run();
 	EXPECT_EQ(stern.correct(), true);
 }
+
+// to small. bruteforcing finds to many solutions
+//TEST(SternMO, t431t1p2) {
+//	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=2,.l=19,.c=0,.threads=1};
+//	static constexpr ConfigSternMO config{isdConfig};
+//
+//	SternMO<isdConfig, config> stern{};
+//	stern.from_string(h, s);
+//	stern.run();
+//	EXPECT_EQ(stern.correct(), true);
+//}
 
 
 int main(int argc, char **argv) {
