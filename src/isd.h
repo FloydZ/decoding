@@ -246,9 +246,12 @@ public:
 
 	// generate a random instance
 	constexpr void random() noexcept {
-		A.random();
-		uint32_t rank = A.gaus();
-		ASSERT(rank > 0);
+		uint32_t rank = 0;
+		while (rank < n-k){
+			A.random();
+			rank = A.gaus();
+			rank = A.fix_gaus(P, rank, n-k);
+		}
 
 		e.random_row_with_weight(0, config.w);
 		PCMatrixOrg::mul_transposed(s, A, e);
