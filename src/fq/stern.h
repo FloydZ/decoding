@@ -48,7 +48,7 @@ public:
 	using IndexType = TypeTemplate<HM_nrb * HM_bs>;
 
 	/// needed list stuff
-	constexpr static uint32_t enum_length = (k + l + 1u) >> 1u;
+	constexpr static uint32_t enum_length = (k + l) >> 1u;
 	constexpr static uint32_t enum_offset = k + l - enum_length;
 	constexpr static size_t list_size = compute_combinations_fq_chase_list_size<enum_length, q, p>();
 	using List = Parallel_List_FullElement_T<Element>;
@@ -115,8 +115,7 @@ public:
 		/// init lists
 		L1 = new List(list_size, threads);
 		L2 = new List(list_size, threads);
-		ASSERT(L1 != nullptr);
-		ASSERT(L2 != nullptr);
+		ASSERT((L1 != nullptr) && (L2 != nullptr));
 
 		///// init hashmap
 		hm = new HM;
@@ -144,33 +143,30 @@ public:
 		const size_t end = L2->end_pos(tid);
 
 		Label tmp;
-		l_type synd = Compress(ws);
 		for (size_t i = start; i < end; ++i) {
 			l_type data = NegateCompress(L2->at(i).label);
-			data = Label::template add_T<l_type>(data, synd);
+			data = Label::template add_T<l_type>(data, syndrome);
 
 			/// search in HM
-			HM_LoadType load; // TODO maybe hier sowas wie fast_load_type
+			HM_LoadType load;
 			IndexType pos = hm->find(data, load);
-
 			for (uint64_t j = pos; j < pos + load; j++) {
 				const IndexType index = hm->ptr(j)[0];
-				pos += 1;
 
 				/// TODO not really nice
 				Label::add(tmp, L1->at(index).label, L2->at(i).label);
 				Label::sub(tmp, ws, tmp);
 
-				//std::cout << std::endl;
-				//L2->at(i).label.print();
-				//L1->at(index).label.print();
-				//tmp.print();
-				//ws.print();
-				//std::cout << i << " " << index << std::endl;
+				// std::cout << std::endl;
+				// L2->at(i).label.print();
+				// L1->at(index).label.print();
+				// tmp.print();
+				// ws.print();
+				// std::cout << i << " " << index << std::endl;
 
 				/// some debug checks
-				for (uint32_t j = 0; j < l; ++j) {
-					ASSERT(tmp.get(j) == 0);
+				for (uint32_t s = 0; s < l; ++s) {
+					ASSERT(tmp.get(s) == 0);
 				}
 
 				/// if this checks passes we found a solution
@@ -204,7 +200,6 @@ public:
 			tmpe.set(label_solution_to_recover.get(l + i), 0, (n-k-l) - i - 1);
 		}
 
-		tmpe.print();
 		for (uint32_t i = 0; i < k+l; ++i) {
 			tmpe.set(value_solution_to_recover.get(i), 0, (n-k-l)+i);
 		}
@@ -227,9 +222,9 @@ public:
 		while (not_found && (loops < config.loops)) {
 			ISD::step();
 
-			#pragma omp parallel default(none) shared(std::cout,L1,not_found,loops) num_threads(threads)
+			// #pragma omp parallel default(none) shared(std::cout,L1,not_found,loops) num_threads(threads)
 			{
-				const uint32_t tid = Thread::get_tid();
+				const uint32_t tid = 0; //Thread::get_tid();
 				init_list(tid);
 				Thread::sync();
 				find_collisions(tid);

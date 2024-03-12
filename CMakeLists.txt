@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # options
 option(USE_TCMALLOC "Enable tcmalloc" OFF)
-option(USE_SANITIZER "Enable memory sanitizer" OFF)
+option(USE_SANITIZER "Enable memory sanitizer" ON)
 option(USE_NOINLINE "Enable -fno-inline" OFF)
 option(USE_LTO "Enable -flto" OFF)
 option(USE_PROFILE "Enable profile guided optmization" OFF)
@@ -99,11 +99,11 @@ if(USE_TCMALLOC)
 	set(MALLOC_LIBRARY_FLAGS "tcmalloc")
 endif()
 
-if(USE_SANITIZER AND COMPILER_SUPPORTS_SANITIZE_ADDRESS)
+#if(USE_SANITIZER AND COMPILER_SUPPORTS_SANITIZE_ADDRESS)
 	message(STATUS "Using address sanitize")
 	# possible sanitizers = -fsanitize=[address,leak,thread,memory,undefined]
 	set(SANITIZER_FLAGS "-fsanitize=address -fsanitize=pointer-compare -fno-omit-frame-pointer")
-endif()
+#endif()
 
 if(USE_NOINLINE AND COMPILER_SUPPORTS_NO_INLINE)
 	message(STATUS "not inlining")

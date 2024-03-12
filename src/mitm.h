@@ -776,7 +776,7 @@ public:
 
 			const size_t left_base = hm.find(data, left_load);
 			for (uint64_t v = left_base; v < left_base + left_load; v++) {
-				const l_type tmp2 = data ^ hm.ptr(v).data();
+				// const l_type tmp2 = data ^ hm.ptr(v).data();
 				for (uint32_t i = 0; i < 2; ++i) { // TODO not correct, need to be an iterator (for appending)
 					index[i] = hm.ptr(v).index[i];
 				}

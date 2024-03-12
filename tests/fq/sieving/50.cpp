@@ -14,8 +14,6 @@ using ::testing::UnitTest;
 
 
 TEST(Sieving, t1p2) {
-	constexpr uint32_t bucketsize = 16;
-
 	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=q,.w=w,.p=2,.l=3,.c=0,.threads=1};
 	static constexpr ConfigFqSieving config{isdConfig, .HM_bs=20, .sieving_steps=5, .enumeration_q=3};
 
@@ -24,6 +22,8 @@ TEST(Sieving, t1p2) {
 	sieve.run();
 	EXPECT_EQ(sieve.correct(), true);
 }
+
+
 
 
 int main(int argc, char **argv) {

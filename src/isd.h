@@ -129,12 +129,6 @@ public:
 	/// permutation
 	Permutation P{config.n};
 
-	/// changelist stuff
-	chase<(config.k+config.l)/2 + config.epsilon, config.p, config.q> c{};
-	using cle = std::pair<uint16_t, uint16_t>;
-	const size_t list_size = c.list_size();
-	std::vector<cle> cL;
-
 	/// not constant values.
 	const double ghz = std::max(osfreq(), 1.); // just to make sure we are not dividing by zero
 	uint64_t loops = 0, expected_loops = 0;
@@ -145,17 +139,13 @@ public:
 	static_assert(config.epsilon <= ((config.l+config.k)/2));
 	static_assert(config.l < (config.n-config.k));
 
-	constexpr ISDInstance(bool use_changelist=false) noexcept : c(){
+	constexpr ISDInstance() noexcept {
 		/// warn the user if the internal datastructures are
 		/// not using a optimized arithmetic
 		if constexpr (!Label::optimized()) {
 			std::cout << "WARNING: the arithmetic is not optimized for "
 					  << config.q << ", a generic fallback implementation will be used."
 					  << std::endl;
-		}
-
-		if (use_changelist) {
-			compute_changelist();
 		}
 	}
 
@@ -261,15 +251,6 @@ public:
 		std::cout << "this is the solution vector" << std::endl;
 	}
 
-	constexpr void compute_changelist() noexcept {
-		cL.resize(list_size);
-		size_t ctr = 0;
-		c.enumerate([&, this](const uint16_t p1, const uint16_t p2){
-			cL[ctr] = cle{p1, p2};
-			ctr += 1;
-		});
-	}
-
 	constexpr void compute_parity_row() {
 		for (uint32_t i = 0; i < config.n; ++i) {
 			wA.set(1, config.n-config.k, i);
@@ -345,7 +326,7 @@ public:
 			constexpr TT mask = (1u << (q_bits*lprime)) - 1u;
 
 			for (uint32_t i = 0; i < config.k + config.l; i++) {
-				lHT[i] = HT[i][0] & mask;
+				lHT[i] = HT.limb(i, 0) & mask;
 			}
 		} else {
 			constexpr uint32_t low = offset;
