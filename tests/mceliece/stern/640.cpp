@@ -1,6 +1,4 @@
 #include <gtest/gtest.h>
-#include <iostream>
-#include <cstdint>
 
 #include "../challenges/mce640.h"
 #include "stern.h"
@@ -18,7 +16,7 @@ using ::testing::UnitTest;
 
 TEST(Stern, t640t1p2) {
 	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=2,.l=16,.c=0,.threads=1};
-	static constexpr ConfigStern config{isdConfig, .HM_bucketsize=16};
+	static constexpr ConfigStern config{isdConfig, 16};
 
 	Stern<isdConfig, config> stern{};
 	stern.from_string(h, s);
@@ -28,7 +26,7 @@ TEST(Stern, t640t1p2) {
 
 TEST(Stern, t640t1p2c20) {
 	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=2,.l=16,.c=20,.threads=1};
-	static constexpr ConfigStern config{isdConfig, .HM_bucketsize=16};
+	static constexpr ConfigStern config{isdConfig, 16};
 
 	Stern<isdConfig, config> stern{};
 	stern.from_string(h, s);
@@ -38,8 +36,8 @@ TEST(Stern, t640t1p2c20) {
 
 TEST(SternIM, t640t1p2) {
 	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=2,.l=19,.c=0,.threads=1};
-	static constexpr ConfigStern configStern{isdConfig, .HM_bucketsize=16};
-	static constexpr ConfigSternIM config{isdConfig, .nr_views=2};
+	static constexpr ConfigStern configStern{isdConfig, 16};
+	static constexpr ConfigSternIM config{isdConfig, 2};
 
 	SternIM<isdConfig, configStern, config> stern{};
 	stern.from_string(h, s);
@@ -49,7 +47,7 @@ TEST(SternIM, t640t1p2) {
 
 TEST(SternMO, t640t1p2) {
 	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=2,.l=19,.c=0,.threads=1};
-	static constexpr ConfigSternMO config{isdConfig, .r=4, .N=20, .dk=14, .nnk=32};
+	static constexpr ConfigSternMO config{isdConfig, 4, 20, 14, 32};
 
 	SternMO<isdConfig, config> stern{};
 	stern.from_string(h, s);

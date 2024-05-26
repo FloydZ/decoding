@@ -66,19 +66,19 @@ public:
 	constexpr static uint32_t gaus_c = config.c;
 
 	using ISD = ISDInstance<uint64_t, isd>;
-	using PCMatrixOrg 	= ISD::PCMatrixOrg;
-	using PCMatrixOrg_T = ISD::PCMatrixOrg_T;
-	using PCMatrix 		= ISD::PCMatrix;
-	using PCMatrix_T 	= ISD::PCMatrix_T;
-	using PCSubMatrix 	= ISD::PCSubMatrix;
-	using PCSubMatrix_T = ISD::PCSubMatrix_T;
-	using Syndrome 		= ISD::Syndrome;
-	using Error 		= ISD::Error;
-	using Label 		= ISD::Label;
+	using PCMatrixOrg 	= typename ISD::PCMatrixOrg;
+	using PCMatrixOrg_T = typename ISD::PCMatrixOrg_T;
+	using PCMatrix 		= typename ISD::PCMatrix;
+	using PCMatrix_T 	= typename ISD::PCMatrix_T;
+	using PCSubMatrix 	= typename ISD::PCSubMatrix;
+	using PCSubMatrix_T = typename ISD::PCSubMatrix_T;
+	using Syndrome 		= typename ISD::Syndrome;
+	using Error 		= typename ISD::Error;
+	using Label 		= typename ISD::Label;
 	using ISD::A,ISD::H,ISD::wA,ISD::wAT,ISD::HT,ISD::s,ISD::ws,ISD::e,ISD::syndrome,ISD::P,ISD::not_found,ISD::loops,ISD::ghz;
 	using ISD::cycles,ISD::periodic_print,ISD::packed,ISD::simd;
 
-	using l_type   = ISD::l_type;
+	using l_type   = typename ISD::l_type;
 	using keyType = LogTypeTemplate<l>;
 	// using valueType = TypeTemplate<bc(n, p)>[1];
 
@@ -125,7 +125,7 @@ public:
 	HM1 *hm1; HM2 *hm2;
 
 	constexpr static ConfigEnumHashMap configEnum{config};
-	constexpr static ConfigEnumHashMapD2 configEnumD2{config, .l1=l1, .l2=l2};
+	constexpr static ConfigEnumHashMapD2 configEnumD2{config, l1, l2};
 	EnumHashMap<configEnum, HM1> *bEnum;
 	CollisionHashMap<configEnum, HM1> *cEnum;
 	CollisionHashMapD2<configEnumD2, HM1, HM2> *cEnumD2;
@@ -257,10 +257,19 @@ public:
 			ISD::extract_pHT(pHT);
 
 
+			/// TODO describe the parameters
+			/// \param a1
+			/// \param a2
+			/// \param index1
+			/// \param index2
+			/// \param nr_cols
 			auto f1 = [&, this](const l_type a1, const l_type a2,
 			                    const uint16_t *index1, const uint16_t *index2,
 			                    const uint32_t nr_cols) __attribute__((always_inline)) {
+				// NOTE: iT1 curently unknown in the global scope
 			  	// ASSERT(bEnum->check_hashmap2(iT1, index1, 2*p, l1));
+				(void) index2;
+				(void) nr_cols;
 				const l_type a = a1 ^ a2;
 				hm2->insert(a>>l1, V2::create(a, index1));
 			};
@@ -269,6 +278,11 @@ public:
 								const uint16_t *index1, const uint16_t *index2,
 								const uint32_t nr_cols) __attribute__((always_inline)) {
 			  	ASSERT(bEnum->check_hashmap2(syndrome, index1, 4*p, l));
+				(void) index2;
+				(void) nr_cols;
+				(void) a1;
+				(void) a2;
+
 				for (uint32_t i = 0; i < 4; ++i) {
 					final_list[final_list_current_size][i] = index1[i];
 				}
@@ -294,6 +308,7 @@ public:
 				while ((iT1 ^ syndrome) < iT1) {
 					iT1 += 1;
 				}
+
 				const l_type iT2 = iT1 ^ syndrome;
 
 				cEnum->step(iT1, f1, tid, simd);

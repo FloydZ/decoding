@@ -27,7 +27,7 @@ public:
 
 
 	// returns the expected number of iterations
-	[[nodiscard]] consteval uint64_t compute_loops() const noexcept {
+	[[nodiscard]] constexpr uint64_t compute_loops() const noexcept {
 #ifdef EXPECTED_PERMUTATIONS
 		return EXPECTED_PERMUTATIONS;
 #else
@@ -60,15 +60,15 @@ public:
 	static_assert(config.HM_bucketsize > 0);
 
 	using ISD = ISDInstance<uint64_t, isd>;
-	using Error 		= ISD::Error;
-	using Label 		= ISD::Label;
-	using limb_type 	= ISD::limb_type;
+	using Error 		= typename ISD::Error;
+	using Label 		= typename ISD::Label;
+	using limb_type 	= typename ISD::limb_type;
 	using ISD::A,ISD::H,ISD::wA,ISD::wAT,ISD::HT,ISD::s,ISD::ws,ISD::e,ISD::syndrome,ISD::P,ISD::not_found,ISD::loops,ISD::ghz,ISD::expected_loops;
 	using ISD::cycles,ISD::periodic_print,ISD::packed,ISD::simd;
 
 
 	// base datatype of the hashmap
-	using l_type   = ISD::l_type;
+	using l_type   = typename ISD::l_type;
 
 	constexpr static uint32_t kl_half = (k+l)/2;
 
