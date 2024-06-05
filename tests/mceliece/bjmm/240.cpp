@@ -4,7 +4,6 @@
 
 #include "../challenges/mce240.h"
 #include "bjmm.h"
-#include "eb.h"
 
 using ::testing::EmptyTestEventListener;
 using ::testing::InitGoogleTest;
