@@ -15,7 +15,7 @@ using ::testing::UnitTest;
 
 TEST(BJMM, t1284t1p1) {
 	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=1,.l=19,.c=0,.threads=1};
-	static constexpr ConfigBJMM config{isdConfig, .l1=2, .HM1_bucketsize=1<<6, .HM2_bucketsize=4};
+	static constexpr ConfigBJMM config{isdConfig, 2, 1<<6, 4};
 
 	BJMM<isdConfig, config> bjmm{};
 	bjmm.from_string(h, s);

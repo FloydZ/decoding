@@ -1,5 +1,4 @@
 #include <gtest/gtest.h>
-#include <iostream>
 
 #include "../challenges/50_20_4.h"
 #include "fq/sieving.h"
@@ -15,7 +14,7 @@ using ::testing::UnitTest;
 
 TEST(Sieving, t1p2) {
 	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=q,.w=w,.p=2,.l=3,.c=0,.threads=1};
-	static constexpr ConfigFqSieving config{isdConfig, .HM_bs=20, .sieving_steps=5, .enumeration_q=3};
+	static constexpr ConfigFqSieving config{isdConfig, 20, 5, 3};
 
 	FqSieving<isdConfig, config> sieve{};
 	sieve.from_string(h, s);

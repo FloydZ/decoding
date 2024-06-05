@@ -380,11 +380,10 @@ class CollisionHashMap {
 	constexpr static size_t enumeration_size = bc(enumeration_length, enumeration_weight);
 	constexpr static size_t enumeration_size_per_thread = enumeration_size/threads;
 
-	using HM_LoadType  			= HashMap::load_type;
-	using HM_DataType  			= HashMap::data_type;
-
-	using HM_DataType_IndexType = HM_DataType::index_type;
-	using l_type 				= HM_DataType::data_type;
+	using HM_LoadType  			= typename HashMap::load_type;
+	using HM_DataType  			= typename HashMap::data_type;
+	using HM_DataType_IndexType = typename HM_DataType::index_type;
+	using l_type 				= typename HM_DataType::data_type;
 	constexpr static size_t HM1_BUCKETSIZE = HashMap::bucketsize;
 
 	using cle = std::pair<uint16_t, uint16_t>;
@@ -395,8 +394,8 @@ class CollisionHashMap {
 	             *lHTr = nullptr;
 
 public:
-	constexpr CollisionHashMap(const l_type *lHT, HashMap *hm, cle *cL = nullptr) noexcept :
-		cL(cL), hm(hm),  lHT(lHT), lHTr(lHT + n_half - config.epsilon) {
+	constexpr CollisionHashMap(const l_type *_lHT, HashMap *hm, cle *cL = nullptr) noexcept :
+		cL(cL), hm(hm), lHT(_lHT), lHTr(_lHT + n_half - config.epsilon) {
 	}
 
 	///
@@ -600,26 +599,27 @@ class CollisionHashMapD2 {
 	constexpr static size_t enumeration_size = bc(enumeration_length,enumeration_weigth);
 	constexpr static size_t enumeration_size_per_thread = enumeration_size/threads;
 
-	using HM_LoadType  		= HashMap2::load_type;
-	using HM_DataType  		= HashMap2::data_type;
-	using HM_DataType_IndexType = HM_DataType::index_type;
-	using l_type 				= HM_DataType::data_type;
+	using HM_LoadType  			= typename HashMap2::load_type;
+	using HM_DataType  			= typename HashMap2::data_type;
+	using HM_DataType_IndexType = typename HM_DataType::index_type;
+	using l_type 				= typename HM_DataType::data_type;
 
+	const l_type *lHT, *lHTr;
 	HashMap1 *hm1;
 	HashMap2 *hm2;
-	const l_type *lHT = nullptr, *lHTr = nullptr;
 
 
 public:
-	CollisionHashMapD2(const l_type *lHT,
+	CollisionHashMapD2(const l_type *_lHT,
 	                   HashMap1 *hm1,
 	                   HashMap2 *hm2) noexcept :
-			lHT(lHT), lHTr(lHT + n_half - config.epsilon), hm1(hm1), hm2(hm2) {
-	}
+		lHT(_lHT), lHTr(_lHT + n_half - config.epsilon), 
+		hm1(hm1), hm2(hm2) {}
 
 	template<typename F>
 	bool step(const l_type iT, F &&f, const uint32_t tid = 0, const bool simd=true) {
 		/// TODO simd
+		(void)simd;
 		return coll_hashmap_simple(iT, tid, f);
 	}
 

@@ -19,7 +19,7 @@ TEST(Bjmm, t240) {
 	constexpr uint32_t bucketsize2 = 8;
 
 	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=1,.l=10,.c=0,.threads=1};
-	static constexpr ConfigBJMM config{isdConfig, .l1=4, .HM1_bucketsize=bucketsize1, .HM2_bucketsize=bucketsize2};
+	static constexpr ConfigBJMM config{isdConfig, 4, bucketsize1, bucketsize2};
 
 	BJMM<isdConfig, config> bjmm{};
 	bjmm.from_string(h, s);

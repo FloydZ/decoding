@@ -55,7 +55,7 @@ check_cxx_compiler_flag(-march=native COMPILER_SUPPORTS_MARCH_NATIVE)
 check_cxx_compiler_flag(-fno-inline COMPILER_SUPPORTS_NO_INLINE)
 check_cxx_compiler_flag(-fsanitize=address COMPILER_SUPPORTS_SANITIZE_ADDRESS) # TODO support not recognized
 check_cxx_compiler_flag(-fsanitize=memory COMPILER_SUPPORTS_SANITIZE_MEMORY)
-check_cxx_compiler_flag(-fconstexpr-steps=91 COMPILER_SUPPORTS_CONSTEXPR_COST)
+check_cxx_compiler_flag(-fconstexpr-steps=9999999 COMPILER_SUPPORTS_CONSTEXPR_COST)
 check_cxx_compiler_flag(-fno-exceptions COMPILER_SUPPORTS_NO_EXCEPTION)
 check_ipo_supported(RESULT lto_supported OUTPUT error)
 check_cxx_compiler_flag(-latomic LINKER_SUPPORTS_ATOMIC) # TODO
@@ -113,18 +113,18 @@ if(lto_supported AND USE_LTO)
   set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
 endif()
 
-set(ALLOWED_WARNINGS " -Wno-c99-designator -Wno-invalid-constexpr -Wno-unused-function -Wno-zero-length-array")
+set(ALLOWED_WARNINGS " -Wno-unknown-pragmas -Wno-c99-designator -Wno-invalid-constexpr -Wno-unused-function -Wno-zero-length-array")
 
 message(STATUS "System Processor: ${CMAKE_SYSTEM_PROCESSOR}")
 
 IF(${CMAKE_SYSTEM_PROCESSOR} MATCHES "arm" OR ${CMAKE_SYSTEM_PROCESSOR} MATCHES "aarch64") 
 	message(STATUS "ARM CPU detected")
     set(ADDITIONAL_FLAGS "-DUSE_ARM -flax-vector-conversions -march=native")
-	set(DEBUG_FLAGS "-g -Wall -Wextra -Wpedantic -fpermissive -DDEBUG ${INLINE_FLAGS} ${ALLOWED_WARNINGS} ${SANITIZER_FLAGS} ${ADDITIONAL_FLAGS}")
+	set(DEBUG_FLAGS "-g -Wall -Wextra -fpermissive -DDEBUG ${INLINE_FLAGS} ${ALLOWED_WARNINGS} ${SANITIZER_FLAGS} ${ADDITIONAL_FLAGS}")
     set(OPTIMIZE_FLAGS "-O3 -DNDEBUG  ${INLINE_FLAGS} ${ALLOWED_WARNINGS} ${ADDITIONAL_FLAGS}")
 else()
 
-    set(DEBUG_FLAGS "-g -O0 -Wall -Wextra -Wpedantic -DDEBUG ${INLINE_FLAGS} ${ALLOWED_WARNINGS} ${SANITIZER_FLAGS} ${ADDITIONAL_FLAGS}")
+    set(DEBUG_FLAGS "-g -O0 -Wall -Wextra -DDEBUG ${INLINE_FLAGS} ${ALLOWED_WARNINGS} ${SANITIZER_FLAGS} ${ADDITIONAL_FLAGS}")
 	set(OPTIMIZE_FLAGS "-g -march=native -DNDEBUG ${INLINE_FLAGS} ${ALLOWED_WARNINGS} ${ADDITIONAL_FLAGS}")
 endif()
 
@@ -189,7 +189,6 @@ if(CMAKE_CUDA_COMPILER)
     # again only for arch... fuck NVIDIA
     include_directories(/opt/cuda/samples/cuda-samples/Common)
     include_directories(/usr/local/cuda/samples/cuda-samples/Common)
-    include_directories(/home/floyd.zweydinger/cuda-samples/Common)
     include_directories(/opt/cuda/include)
     include_directories(deps/cudacommon)
     include_directories(deps/cuCollections/include)
@@ -225,12 +224,7 @@ if(CMAKE_CUDA_COMPILER)
 endif()
 
 # include every subpackage which is included in `cryptanalysislib`
-include_directories("deps/cryptanalysislib/deps/fplll/")
 include_directories("deps/cryptanalysislib/deps/b63/include/b63")
-include_directories("deps/cryptanalysislib/deps/m4ri/m4ri")
-include_directories("deps/cryptanalysislib/deps/m4ri")
-include_directories("deps/cryptanalysislib/deps/ska_sort")
-include_directories("deps/cryptanalysislib/deps/Static-Sort/include")
 include_directories("deps/cryptanalysislib/src")
 
 include_directories("src")
@@ -238,8 +232,6 @@ include_directories("test/decoding/challenges")
 include_directories("test/mceliece/challenges")
 include_directories("/usr/local/include")
 
-link_directories("deps/cryptanalysislib/build")
-link_directories("deps/cryptanalysislib/deps/m4ri/.libs")
 link_directories("/usr/local/lib")
 
 #TODO 
