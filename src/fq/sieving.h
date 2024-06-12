@@ -196,8 +196,7 @@ public:
 
 			/// NOTE: the compressor negates the data, needed to be able
 			/// to search for exact matches.
-			l_type data1 = this->template NegateCompress
-			        <lower_l>(L1->at(i).label);
+			l_type data1 = this->NegateCompress(L1->at(i).label);
 			IndexType pos1 = hm1->find(data1, load1);
 
 			while (pos1 < load1) {
@@ -277,8 +276,7 @@ public:
 			HM_LoadType load1;
 
 			/// NOTE: the compressor negates the data
-			l_type data1 = this->template NegateCompress
-					<lower_l_bit>(L1->at(i).label);
+			l_type data1 = this->NegateCompress(L1->at(i).label);
 
 			/// NOTE: maybe I can prepare data1 before hand?
 			IndexType pos1 = hm1->find(data1, load1);

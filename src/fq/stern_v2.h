@@ -43,7 +43,6 @@ public:
 
 	constexpr static uint32_t HM_nrb = ISD::HashMasp_BucketSize(l);
 	constexpr static uint32_t HM_bs = config.HM_bucketsize;
-	constexpr static uint32_t NR_HT_LIMBS = PCSubMatrix_T::limbs_per_row();
 
 	constexpr static bool packed = ISD::packed;
 
@@ -52,6 +51,9 @@ public:
 	using IndexType = TypeTemplate<HM_nrb * HM_bs>;
 
 	l_type *lHT;
+
+	constexpr static uint32_t NR_HT_LIMBS 	= (n-k+sizeof(limb_type)*8 - 1u)/((sizeof(limb_type)*8));
+	constexpr static uint32_t NR_HT_T_LIMBS = (n-k+(sizeof(l_type)*8) - 1u)/(sizeof(l_type)*8);
 
 	/// needed list stuff
 	constexpr static uint32_t enum_length = (k + l + isd.epsilon) >> 1u;

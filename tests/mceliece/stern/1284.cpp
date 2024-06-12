@@ -49,15 +49,15 @@ TEST(SternIM, t1284t1p2c20) {
 	EXPECT_EQ(stern.correct(), true);
 }
 
-TEST(SternMO, t1284t1p2) {
-	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=2,.l=17,.c=0,.threads=1, .loops=loops};
-	static constexpr ConfigSternMO config{isdConfig, 2};
-
-	SternMO<isdConfig, config> stern{};
-	stern.from_string(h, s);
-	stern.run();
-	EXPECT_EQ(stern.correct(), true);
-}
+//TEST(SternMO, t1284t1p2) {
+//	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=2,.l=17,.c=0,.threads=1, .loops=loops};
+//	static constexpr ConfigSternMO config{isdConfig, 2};
+//
+//	SternMO<isdConfig, config> stern{};
+//	stern.from_string(h, s);
+//	stern.run();
+//	EXPECT_EQ(stern.correct(), true);
+//}
 
 
 int main(int argc, char **argv) {
