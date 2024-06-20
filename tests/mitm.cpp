@@ -212,6 +212,7 @@ TEST(CollisionHashMap, enumeration) {
 				 HM_DataType_IndexType *index1,
 				 HM_DataType_IndexType *index2,
 	             const uint32_t nr_cols) {
+		(void) nr_cols;
 	    bool found = false;
 		const T a = lp1 ^ lp2;
 		for (size_t i = 0; i < k + l; ++i) {
@@ -270,8 +271,10 @@ TEST(CollisionHashMap, enumerationSIMD) {
 	             HM_DataType_IndexType *index2,
 	             const uint32_t nr_cols) __attribute__((always_inline)) {
 		bool found = true;
+		(void) lp1;
+		(void) lp2;
 		for (uint32_t i = 0; i < nr_cols; ++i) {
-			//TODO found &= data[index1[i]] == data[index2[i]];
+			found &= data[index1[i]] == data[index2[i]];
 		}
 		EXPECT_EQ(found, true);
 	};
@@ -356,8 +359,8 @@ TEST(CollisionHashMapD3, enumeration) {
 	using HM_DataType_IndexType = HM_DataType::index_type;
 
 	static constexpr ConfigEnumHashMap configD1{k+l, p, l1, threads};
-	static constexpr ConfigEnumHashMapD2 configD2{configD1, l2};
-	static constexpr ConfigEnumHashMapD<3> configD3{configD1, .ls={l1, l2, l3}};
+	// static constexpr ConfigEnumHashMapD2 configD2{configD1, l2};
+	static constexpr ConfigEnumHashMapD<3> configD3{configD1, {l1, l2, l3}};
 	T *data = (T *)cryptanalysislib::aligned_alloc(1024, roundToAligned<1024>(sizeof(T) * (k+l)));
 	for (uint32_t i = 0; i < k+l; ++i) { data[i] = fastrandombytes_uint64() & ((1u << l) - 1u);}
 
@@ -383,6 +386,7 @@ TEST(CollisionHashMapD3, enumeration) {
 	};
 
 	auto f3 = [&](const T a, uint16_t *index){
+		(void)index;
 	  	// ASSERT(enumD1.check_hashmap2(iT2, index, 8*p, l));
 	  	std::cout << a << std::endl;
 	};

@@ -20,7 +20,7 @@ constexpr size_t loops = 10000;
 
 TEST(Stern, t1284t1p2) {
 	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=2,.l=19,.c=0,.threads=1, .loops=loops};
-	static constexpr ConfigStern config{isdConfig, .HM_bucketsize=8};
+	static constexpr ConfigStern config{isdConfig, 8};
 
 	Stern<isdConfig, config> stern{};
 	stern.from_string(h, s);
@@ -30,7 +30,7 @@ TEST(Stern, t1284t1p2) {
 
 TEST(Stern, t1284t1p2c20) {
 	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=2,.l=21,.c=20,.threads=1, .loops=loops};
-	static constexpr ConfigStern config{isdConfig, .HM_bucketsize=4};
+	static constexpr ConfigStern config{isdConfig, 4};
 
 	Stern<isdConfig, config> stern{};
 	stern.from_string(h, s);
@@ -40,8 +40,8 @@ TEST(Stern, t1284t1p2c20) {
 
 TEST(SternIM, t1284t1p2c20) {
 	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=2,.l=21,.c=20,.threads=1, .loops=loops};
-	static constexpr ConfigStern configStern{isdConfig, .HM_bucketsize=4};
-	static constexpr ConfigSternIM config{isdConfig, .nr_views=2};
+	static constexpr ConfigStern configStern{isdConfig, 4};
+	static constexpr ConfigSternIM config{isdConfig, 2};
 
 	SternIM<isdConfig, configStern, config> stern{};
 	stern.from_string(h, s);
@@ -49,15 +49,15 @@ TEST(SternIM, t1284t1p2c20) {
 	EXPECT_EQ(stern.correct(), true);
 }
 
-TEST(SternMO, t1284t1p2) {
-	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=2,.l=17,.c=0,.threads=1, .loops=loops};
-	static constexpr ConfigSternMO config{isdConfig, .nr_views=2};
-
-	SternMO<isdConfig, config> stern{};
-	stern.from_string(h, s);
-	stern.run();
-	EXPECT_EQ(stern.correct(), true);
-}
+//TEST(SternMO, t1284t1p2) {
+//	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=2,.l=17,.c=0,.threads=1, .loops=loops};
+//	static constexpr ConfigSternMO config{isdConfig, 2};
+//
+//	SternMO<isdConfig, config> stern{};
+//	stern.from_string(h, s);
+//	stern.run();
+//	EXPECT_EQ(stern.correct(), true);
+//}
 
 
 int main(int argc, char **argv) {

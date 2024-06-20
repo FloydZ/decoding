@@ -1,0 +1,22 @@
+file(GLOB TEST_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp)
+
+foreach(testfile ${TEST_SOURCES})
+    file(RELATIVE_PATH filename ${CMAKE_CURRENT_SOURCE_DIR} ${testfile})
+    string(REPLACE ".cpp" "" file ${filename})
+    add_executable(sd_test_stern_${file} ${testfile})
+    target_compile_options(sd_test_stern_${file} PUBLIC ${COMPILE_TEST_FLAGS})
+    target_link_libraries(sd_test_stern_${file} ${LINK_TEST_FLAGS} ${TCMALLOC_LIBRARIES})
+endforeach(testfile ${TEST_SOURCES})
+
+if(USE_SCLANG)
+    use_sclang_compiler()
+    foreach(testfile ${TEST_SOURCES})
+        file(RELATIVE_PATH filename ${CMAKE_CURRENT_SOURCE_DIR} ${testfile})
+        string(REPLACE ".cpp" "" file ${filename})
+        add_executable(sclang_sd_stern_${file} ${testfile})
+        target_compile_options(sclang_sd_stern_${file} PUBLIC ${COMPILE_TEST_FLAGS})
+        target_link_libraries(sclang_sd_stern_${file} ${LINK_TEST_FLAGS} ${TCMALLOC_LIBRARIES})
+    endforeach(testfile ${TEST_SOURCES})
+    use_host_compiler()
+endif()
+

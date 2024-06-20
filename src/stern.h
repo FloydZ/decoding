@@ -17,9 +17,8 @@ using namespace cryptanalysislib;
 
 struct ConfigStern : public ConfigISD {
 public:
-
 	// number of elements per bucket in the hashmap
-	const uint32_t HM_bucketsize = 0;
+	const uint32_t HM_bucketsize = bc((k+l)/2, p) >> l;
 
 	// number of elements which can be contained in the last list.
 	// this is only a tmp storage, after this many elements were added
@@ -28,7 +27,7 @@ public:
 
 
 	// returns the expected number of iterations
-	[[nodiscard]] consteval uint64_t compute_loops() const noexcept {
+	[[nodiscard]] constexpr uint64_t compute_loops() const noexcept {
 #ifdef EXPECTED_PERMUTATIONS
 		return EXPECTED_PERMUTATIONS;
 #else
@@ -56,16 +55,20 @@ public:
 	constexpr static uint32_t l = config.l;
 	constexpr static uint32_t q = config.q;
 
+	static_assert(p > 0);
+	static_assert(l > 0);
+	static_assert(config.HM_bucketsize > 0);
+
 	using ISD = ISDInstance<uint64_t, isd>;
-	using Error 		= ISD::Error;
-	using Label 		= ISD::Label;
-	using limb_type 	= ISD::limb_type;
+	using Error 		= typename ISD::Error;
+	using Label 		= typename ISD::Label;
+	using limb_type 	= typename ISD::limb_type;
 	using ISD::A,ISD::H,ISD::wA,ISD::wAT,ISD::HT,ISD::s,ISD::ws,ISD::e,ISD::syndrome,ISD::P,ISD::not_found,ISD::loops,ISD::ghz,ISD::expected_loops;
 	using ISD::cycles,ISD::periodic_print,ISD::packed,ISD::simd;
 
 
 	// base datatype of the hashmap
-	using l_type   = ISD::l_type;
+	using l_type   = typename ISD::l_type;
 
 	constexpr static uint32_t kl_half = (k+l)/2;
 
@@ -223,7 +226,7 @@ public:
 			biject_simd<baselist_enumeration_length, p>(right, rows2);
 
 			// ignore special case for lowest limb
-			uint32x8_t wt{0};
+			uint32x8_t wt{};
 			int wt_ = 0;
 
 			#pragma unroll
@@ -329,6 +332,7 @@ public:
 			auto f = [&, this](const l_type a1, const l_type a2,
 			                   const uint16_t *index1, const uint16_t *index2,
 			                   const uint32_t nr_cols) __attribute__((always_inline)) -> bool {
+				(void)nr_cols;
 				if constexpr (!SternCollType) {
 					ASSERT(bEnum->check_hashmap2(syndrome, index1, 2 * p, l));
 					const l_type a = a1 ^ a2;

@@ -25,15 +25,10 @@ public:
 	constexpr static uint32_t l = isd.l;
 	constexpr static uint32_t q = isd.q;
 
+	static_assert(l == 0);
+	static_assert(p == 0);
+
 	using ISD = ISDInstance<uint64_t, isd>;
-	using PCMatrixOrg 	= ISD::PCMatrixOrg;
-	using PCMatrixOrg_T = ISD::PCMatrixOrg_T;
-	using PCMatrix 		= ISD::PCMatrix;
-	using PCMatrix_T 	= ISD::PCMatrix_T;
-	using PCSubMatrix 	= ISD::PCSubMatrix;
-	using PCSubMatrix_T = ISD::PCSubMatrix_T;
-	using Syndrome 		= ISD::Syndrome;
-	using Error 		= ISD::Error;
 	using Label 		= ISD::Label;
 	using limb_type 	= ISD::limb_type;
 	using ISD::A,ISD::H,ISD::wA,ISD::wAT,ISD::HT,ISD::s,ISD::ws,ISD::e,ISD::syndrome,ISD::P,ISD::not_found,ISD::loops,ISD::ghz;

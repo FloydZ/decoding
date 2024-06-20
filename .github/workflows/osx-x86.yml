@@ -1,0 +1,50 @@
+name: osx
+env:
+  BUILD_TYPE: Release
+
+on: [push]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            TARGET: x86_64-apple-darwin
+            COMPILER: clang
+            LINKER: clang
+
+    name: Build & test on ${{ matrix.os }} with ${{ matrix.compiler }}.
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+
+    - name: Install Software (HomeBrew)
+      run: |
+        sudo rm -f /usr/local/bin/2to3
+        sudo rm -f /usr/local/bin/2to3-3.12
+        sudo rm -f /usr/local/bin/idle3
+        sudo rm -f /usr/local/bin/idle3.12
+        sudo rm -f /usr/local/bin/python
+        sudo rm -f /usr/local/bin/python3
+        sudo rm -f /usr/local/bin/python3.12
+        sudo rm -f /usr/local/bin/pydoc3
+        sudo rm -f /usr/local/bin/pydoc3.12
+        sudo rm -f /usr/local/bin/python3-config
+        sudo rm -f /usr/local/bin/python3.12-config
+
+        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+        brew install libomp llvm googletest google-benchmark
+
+    - name: Configure CMake
+      run: cmake -B ${{github.workspace}}/build -D CMAKE_CXX_COMPILER=$(brew --prefix llvm)/bin/clang++
+
+    - name: Build
+      run: cmake --build ${{github.workspace}}/build --config Debug
+
+    - name: Test
+      working-directory: ${{github.workspace}}/build
+      run: ctest -C Debug -V

@@ -9,14 +9,14 @@
 
 struct ConfigSternMO : public ConfigISD {
 public:
-	const uint32_t nr_views = 0;
-
 	/// Well, ... currently this forces the windowsize `k` = 64.
 	const uint32_t r = 3;//(n-k + 63) / 64;
 	const uint32_t N = 50; //
 	const uint32_t dk = 12;// (w-2*p) + 6;
 	const uint32_t nnk = 32;
 
+	// debug mode. in case needed, we can enforce bruteforce
+	const bool enforce_bf = false;
 	[[nodiscard]] consteval uint64_t compute_loops() const noexcept {
 #ifdef EXPECTED_PERMUTATIONS
 		return EXPECTED_PERMUTATIONS;
@@ -27,7 +27,7 @@ public:
 
 	void print() const noexcept {
 		ConfigISD::print();
-		std::cout << "{ \"nr_views\": " << nr_views
+		std::cout << "{ "
 		          << ", \"r\": " << r
 				  << ", \"N\": " << N
 				  << ", \"dk\": " << dk
@@ -48,13 +48,7 @@ public:
 	constexpr static uint32_t r = config.r;
 
 	using ISD = ISDInstance<uint64_t, isd>;
-	using PCMatrixOrg 	= ISD::PCMatrixOrg;
-	using PCMatrixOrg_T = ISD::PCMatrixOrg_T;
-	using PCMatrix 		= ISD::PCMatrix;
-	using PCMatrix_T 	= ISD::PCMatrix_T;
-	using PCSubMatrix 	= ISD::PCSubMatrix;
 	using PCSubMatrix_T = ISD::PCSubMatrix_T;
-	using Syndrome 		= ISD::Syndrome;
 	using Error 		= ISD::Error;
 	using Label 		= ISD::Label;
 	using limb_type 	= ISD::limb_type;
@@ -83,6 +77,7 @@ public:
 	size_t solutions[2*p] = {0};
 
 	constexpr SternMO() noexcept {
+		nn_config.print();
 		expected_loops = config.compute_loops();
 
 		stern_MO_L1 = (Label *)cryptanalysislib::aligned_alloc(1024, size_MO_L);
@@ -101,7 +96,6 @@ public:
 		uint16_t rows[p];
 		Label tmpl, tmpr;
 		bool foundl = false, foundr = false;
-
 
 		for (size_t i = 0; i < list_enumeration_size; i++) {
 			biject<k, p>(i, rows);
@@ -176,7 +170,7 @@ public:
 	///
 	constexpr void construct_nearest_neighbour_lists() noexcept {
 		alignas(32) Label tmpl, tmpr;
-		uint16_t rows[p];
+		alignas(32) uint16_t rows[p];
 
 		for (size_t i = 0; i < list_enumeration_size; i++) {
 			biject<k, p>(i, rows);
@@ -196,9 +190,11 @@ public:
 
 	/// generates the two lists L1 and L2 from HT
 	constexpr void apply_nearest_neighbour() noexcept {
-		// TODO
-		// algo.avx2_nn(enumeration_size, enumeration_size);
-		algo.bruteforce(list_enumeration_size, list_enumeration_size);
+		if constexpr (config.enforce_bf) {
+			algo.bruteforce(list_enumeration_size, list_enumeration_size);
+		} else {
+			algo.nn(list_enumeration_size, list_enumeration_size);
+		}
 		if (algo.solutions_nr > 0) {
 			solutions[0] = algo.solutions[0].first;
 			solutions[1] = algo.solutions[0].second;

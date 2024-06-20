@@ -1,0 +1,33 @@
+name: arm
+
+on: [push]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - uses: pguyot/arm-runner-action@HEAD
+      with:
+        bind_mount_repository: true
+        base_image: raspios_lite_arm64:latest
+        cpu: cortex-a53
+        image_additional_mb: 512
+        commands: |
+            sudo apt-get install -y cmake make git autoconf libtool libgmp-dev libgmp10
+            git clone --depth=1 --single-branch --branch v1.7.1 https://github.com/google/benchmark.git benchmark && mkdir -p benchmark/build && cd ./benchmark/build &&  cmake -DCMAKE_BUILD_TYPE=Release -DBENCHMARK_ENABLE_GTEST_TESTS=OFF ../ && make -j
+            sudo apt-get install -y libgtest-dev && cd /usr/src/gtest && sudo cmake CMakeLists.txt && sudo make && sudo cp lib/libgtest.a /usr/lib  && sudo cp lib/libgtest_main.a /usr/lib && sudo ln -s /usr/lib/libgtest.a /usr/local/lib/libgtest.a && sudo ln -s /usr/lib/libgtest_main.a /usr/local/lib/libgtest_main.a
+            cd /decoding
+            mkdir -p cmake-build-release
+            mkdir -p cmake-build-debug
+            cd cmake-build-debug
+            cmake .. -DCMAKE_BUILD_TYPE=Debug
+            make -j
+            ctest -C Debug -V  
+            cd ../cmake-build-release
+            cmake .. -DCMAKE_BUILD_TYPE=Release
+            make -j
+            ctest -C Debug -V  

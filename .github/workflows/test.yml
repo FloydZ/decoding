@@ -1,0 +1,116 @@
+name: test
+
+on: [push]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        # ubuntu 20 doesnt support c++20
+        #os: [ubuntu-22.04, ubuntu-20.04]
+        os: [ubuntu-22.04]
+          # TODO currently not working. The CI does not find omp? Probably need 
+          # to install the correct omp version for the correct compiler
+          # compiler: [ g++-10, clang++-11, clang++-12, clang++-13, clang++-14, clang++-15]
+        build_type: [Release, Debug]
+
+    name: Build & test on ${{ matrix.os }} with ${{ matrix.compiler }} in ${{ matrix.build_type }} mode.
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+
+    - name: Install Software
+      run: |
+        sudo apt-get install -y libtbb-dev llvm-11 clang-11 llvm-12 clang-12 llvm-13 clang-13 llvm-14 clang-14 llvm-15 clang-15 gcc-10
+        # libomp-11-dev libomp-12-dev libomp-13-dev libomp-14-dev libomp-15-dev libomp5-11 libomp5-12 libomp5-13 libomp5-14 libomp5-15
+
+    - name: Install Google Benchmark
+      run: git clone --depth=1 --single-branch --branch v1.7.1 https://github.com/google/benchmark.git benchmark && mkdir -p benchmark/build && cd ./benchmark/build &&  cmake -DCMAKE_BUILD_TYPE=Release -DBENCHMARK_ENABLE_GTEST_TESTS=OFF ../ && make -j
+
+    - name: Install gtest
+      run:
+        sudo apt-get install libgtest-dev && cd /usr/src/gtest && sudo cmake CMakeLists.txt && sudo make && sudo cp lib/libgtest.a /usr/lib  && sudo cp lib/libgtest_main.a /usr/lib && sudo ln -s /usr/lib/libgtest.a /usr/local/lib/libgtest.a && sudo ln -s /usr/lib/libgtest_main.a /usr/local/lib/libgtest_main.a
+
+
+    - name: Configure CMake
+      #      env:
+      #        CXX: ${{ matrix.compiler }}
+      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{matrix.build_type}}
+
+    - name: Build
+      run: cmake --build ${{github.workspace}}/build --config ${{matrix.build_type}}
+
+    - name: Test
+      working-directory: ${{github.workspace}}/build
+      run: ctest -C Debug -V
+
+
+        #  Benchmark:
+        #    runs-on: ubuntu-latest
+        #
+        #    steps:
+        #    - uses: actions/checkout@v3
+        #      with:
+        #        submodules: recursive
+        #
+        #    - name: Install Software
+        #      run: |
+        #        sudo apt-get install -y libmpfr-dev libpng-dev libtbb-dev
+        #    
+        #    - name: Configure CMake
+        #      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{matrix.build_type}}
+        #    
+        #    - name: Install Google Benchmark
+        #      run: git clone --depth=1 --single-branch --branch v1.7.1 https://github.com/google/benchmark.git benchmark && mkdir -p benchmark/build && cd ./benchmark/build &&  cmake -DCMAKE_BUILD_TYPE=Release -DBENCHMARK_ENABLE_GTEST_TESTS=OFF ../ && make -j
+        #
+        #    - name: Install gtest
+        #      run:
+        #        sudo apt-get install libgtest-dev && cd /usr/src/gtest && sudo cmake CMakeLists.txt && sudo make && sudo cp lib/libgtest.a /usr/lib  && sudo cp lib/libgtest_main.a /usr/lib && sudo ln -s /usr/lib/libgtest.a /usr/local/lib/libgtest.a && sudo ln -s /usr/lib/libgtest_main.a /usr/local/lib/libgtest_main.a
+        #
+        #    - name: Build
+        #      run: cmake --build ${{github.workspace}}/build --config ${{matrix.build_type}}
+        #
+        #    - name: Bench
+        #      run: cd build && 
+        #        ./bench/container/bench_b63_container_get_bits                -j  | tee benchmark_bench_b63_container_get_bits.json             &&
+        #        ./bench/container/bench_b63_container_kAryPackedContainer     -j  | tee benchmark_bench_b63_container_kAryPackedContainer.json  &&
+        #        
+        #        ./bench/label/bench_b63_label_add                             -j  | tee benchmark_bench_b63_label_add.json                      &&
+        #        ./bench/label/bench_b63_label_add_level                       -j  | tee benchmark_bench_b63_label_add_level.json                &&
+        #        ./bench/label/bench_b63_label_equal_level                     -j  | tee benchmark_bench_b63_label_equal_level.json              &&
+        #        ./bench/label/bench_b63_label_sub                             -j  | tee benchmark_bench_b63_label_sub.json                      &&
+        #        ./bench/label/bench_b63_label_sub_level                       -j  | tee benchmark_bench_b63_label_sub_level.json                &&
+        #        
+        #        ./bench/labeltype/bench_b63_labeltype_add                     -j  | tee benchmark_bench_b63_labeltype_add.json                  &&
+        #        ./bench/labeltype/bench_b63_labeltype_sub                     -j  | tee benchmark_bench_b63_labeltype_sub.json                  &&
+        #        
+        #        ./bench/list/bench_b63_list_binarysearch                      -j  | tee benchmark_bench_b63_list_binarysearchjson               &&
+        #        ./bench/list/bench_b63_list_search                            -j  | tee benchmark_bench_b63_list_search.json                    &&
+        #        ./bench/list/bench_b63_list_sort                              -j  | tee benchmark_bench_b63_list_sort                           &&
+        #        
+        #        ./bench/matrix/bench_b63_matrix/gaus                          -j  | tee benchmark_bench_b63_matrix_gaus                         &&
+        #        
+        #        ./bench/mem/bench_b63_mem_malloc_free                         -j  | tee benchmark_bench_b63_mem_malloc_free.json                &&
+        #        
+        #        ./bench/nn/bench_b63_nn_avx2                                  -j  | tee benchmark_bench_b63_nn_avx2.json                        &&
+        #        ./bench/nn/bench_b63_nn_bruteforce                            -j  | tee benchmark_bench_b63_nn_bruteforce.json                  &&
+        #        ./bench/nn/bench_b63_nn_n128_avx2                             -j  | tee benchmark_bench_b63_nn_n128_avx2.json                   &&
+        #        ./bench/nn/bench_b63_nn_opt                                   -j  | tee benchmark_bench_b63_nn_opt.json                         &&
+        #        ./bench/nn/bench_b63_nn_popcount                              -j  | tee benchmark_bench_b63_nn_popcount.json                    &&
+        #        ./bench/nn/bench_b63_nn_sort_nn_on32                          -j  | tee benchmark_bench_b63_nn_sort_nn_on32.json                &&
+        #        ./bench/nn/bench_b63_nn_sort_nn_on64                          -j  | tee benchmark_bench_b63_nn_sort_nn_on64.json                &&
+        #        
+        #        ./bench/search/bench_b63_search_binarysearch                  -j  | tee benchmark_bench_b63_search_binarysearch.json            &&
+        #        ./bench/search/bench_b63_search_internal_parallel_bucket_search  -j  | tee benchmark_bench_b63_search_internal_parallel_bucket_search.json &&
+        #        
+        #        ./bench/sort/bench_b63_sort_binarycontainer_single_limb       -j  | tee benchmark_bench_b63_sort_binarycontainer_single_limb.json       &&
+        #        ./bench/sort/bench_b63_sort_internal_parallel_bucket_sort     -j  | tee benchmark_bench_b63_sort_internal_parallel_bucket_sort.json     &&
+        #        ./bench/sort/bench_b63_sort_sort                              -j  | tee benchmark_bench_b63_sort_sort.json                      &&
+        #        ./bench/sort/bench_stl_stl                                    -j  | tee benchmark_bench_stl_stl.json                            &&
+        #        ./bench/value/bench_b63_value_absolute                        -j  | tee benchmark_bench_b63_value_absolute.json                 &&
+        #        ./bench/value/bench_b63_value_add                             -j  | tee benchmark_bench_b63_value_add.json                      &&
+        #        ./bench/value/bench_b63_value_move_operator                   -j  | tee benchmark_bench_b63_value_move_operator.json
+

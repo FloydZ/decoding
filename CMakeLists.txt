@@ -7,12 +7,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # options
 option(USE_TCMALLOC "Enable tcmalloc" OFF)
-option(USE_SANITIZER "Enable memory sanitizer" OFF)
+option(USE_SANITIZER "Enable memory sanitizer" ON)
 option(USE_NOINLINE "Enable -fno-inline" OFF)
 option(USE_LTO "Enable -flto" OFF)
 option(USE_PROFILE "Enable profile guided optmization" OFF)
 option(USE_POLLY "Enable polly loop optimization" OFF)
 option(USE_BOLT "Enable bolt binary optmization" OFF)
+option(USE_TRACY "Enable tracy profiling" ON)
 
 set(default_build_type "Release")
 
@@ -48,13 +49,13 @@ ExternalProject_Add(cryptanalysislib_project
 )
 
 
-include("deps/cmake_optimize_for_architecture/HostOptimizations.cmake")
+include("deps/cryptanalysislib/deps/cmake_optimize_for_architecture/HostOptimizations.cmake")
 
 check_cxx_compiler_flag(-march=native COMPILER_SUPPORTS_MARCH_NATIVE)
 check_cxx_compiler_flag(-fno-inline COMPILER_SUPPORTS_NO_INLINE)
 check_cxx_compiler_flag(-fsanitize=address COMPILER_SUPPORTS_SANITIZE_ADDRESS) # TODO support not recognized
 check_cxx_compiler_flag(-fsanitize=memory COMPILER_SUPPORTS_SANITIZE_MEMORY)
-check_cxx_compiler_flag(-fconstexpr-steps=91 COMPILER_SUPPORTS_CONSTEXPR_COST)
+check_cxx_compiler_flag(-fconstexpr-steps=9999999 COMPILER_SUPPORTS_CONSTEXPR_COST)
 check_cxx_compiler_flag(-fno-exceptions COMPILER_SUPPORTS_NO_EXCEPTION)
 check_ipo_supported(RESULT lto_supported OUTPUT error)
 check_cxx_compiler_flag(-latomic LINKER_SUPPORTS_ATOMIC) # TODO
@@ -69,21 +70,14 @@ find_package(benchmark)
 find_package(Git QUIET)
 
 # init the submodules
-if(GIT_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
-    execute_process(COMMAND ${GIT_EXECUTABLE} submodule sync
-                    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                    RESULT_VARIABLE GIT_SUBMOD_RESULT)
-    if(NOT GIT_SUBMOD_RESULT EQUAL "0")
-        message(FATAL_ERROR "git submodule update sync failed with ${GIT_SUBMOD_RESULT}, please checkout submodules")
-    endif()
-
-    execute_process(COMMAND ${GIT_EXECUTABLE} submodule update --init --recursive
-                    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                    RESULT_VARIABLE GIT_SUBMOD_RESULT)
-    if(NOT GIT_SUBMOD_RESULT EQUAL "0")
-        message(FATAL_ERROR "git submodule update --init --recursive failed with ${GIT_SUBMOD_RESULT}, please checkout submodules")
-    endif()
-endif()
+FetchContent_Declare(
+	tracy
+	GIT_REPOSITORY 	https://github.com/wolfpld/tracy
+	GIT_TAG 		master
+	GIT_SHALLOW 	TRUE
+	GIT_PROGRESS 	TRUE
+)
+FetchContent_MakeAvailable(tracy)
 
 # global include directories
 include_directories("deps/b63/include/b63")
@@ -99,11 +93,11 @@ if(USE_TCMALLOC)
 	set(MALLOC_LIBRARY_FLAGS "tcmalloc")
 endif()
 
-if(USE_SANITIZER AND COMPILER_SUPPORTS_SANITIZE_ADDRESS)
+#if(USE_SANITIZER AND COMPILER_SUPPORTS_SANITIZE_ADDRESS)
 	message(STATUS "Using address sanitize")
 	# possible sanitizers = -fsanitize=[address,leak,thread,memory,undefined]
 	set(SANITIZER_FLAGS "-fsanitize=address -fsanitize=pointer-compare -fno-omit-frame-pointer")
-endif()
+#endif()
 
 if(USE_NOINLINE AND COMPILER_SUPPORTS_NO_INLINE)
 	message(STATUS "not inlining")
@@ -119,27 +113,18 @@ if(lto_supported AND USE_LTO)
   set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
 endif()
 
-set(ALLOWED_WARNINGS "
-	-Wno-c99-designator 
-	-Wno-invalid-constexpr 
-	-Wno-unused-function 
-	-Wno-unused-local-typedef 
-	-Wno-overlength-strings 
-	-Wno-unknown-pragmas 
-	-Wno-unused-variable 
-	-Wno-unused-local-typedefs"
-)
+set(ALLOWED_WARNINGS " -Wno-unknown-pragmas -Wno-c99-designator -Wno-invalid-constexpr -Wno-unused-function -Wno-zero-length-array")
 
 message(STATUS "System Processor: ${CMAKE_SYSTEM_PROCESSOR}")
 
 IF(${CMAKE_SYSTEM_PROCESSOR} MATCHES "arm" OR ${CMAKE_SYSTEM_PROCESSOR} MATCHES "aarch64") 
 	message(STATUS "ARM CPU detected")
     set(ADDITIONAL_FLAGS "-DUSE_ARM -flax-vector-conversions -march=native")
-	set(DEBUG_FLAGS "-g -Wall -Wextra -Wpedantic -fpermissive -DDEBUG ${INLINE_FLAGS} ${ALLOWED_WARNINGS} ${SANITIZER_FLAGS} ${ADDITIONAL_FLAGS}")
+	set(DEBUG_FLAGS "-g -Wall -Wextra -fpermissive -DDEBUG ${INLINE_FLAGS} ${ALLOWED_WARNINGS} ${SANITIZER_FLAGS} ${ADDITIONAL_FLAGS}")
     set(OPTIMIZE_FLAGS "-O3 -DNDEBUG  ${INLINE_FLAGS} ${ALLOWED_WARNINGS} ${ADDITIONAL_FLAGS}")
 else()
 
-    set(DEBUG_FLAGS "-g -O0 -Wall -Wextra -Wpedantic -DDEBUG ${INLINE_FLAGS} ${ALLOWED_WARNINGS} ${SANITIZER_FLAGS} ${ADDITIONAL_FLAGS}")
+    set(DEBUG_FLAGS "-g -O0 -Wall -Wextra -DDEBUG ${INLINE_FLAGS} ${ALLOWED_WARNINGS} ${SANITIZER_FLAGS} ${ADDITIONAL_FLAGS}")
 	set(OPTIMIZE_FLAGS "-g -march=native -DNDEBUG ${INLINE_FLAGS} ${ALLOWED_WARNINGS} ${ADDITIONAL_FLAGS}")
 endif()
 
@@ -150,6 +135,11 @@ set(LINK_TEST_FLAGS
 	OpenMP::OpenMP_CXX
 )
 
+if(USE_TRACY)
+	message(STATUS "Using tracy")
+	list(APPEND LINK_TEST_FLAGS TracyClient)
+	# list(APPEND LINK_BENCH_FLAGS TracyClient)
+endif()
 
 # Set additionally our own debug/optimisation compiler/linkage flags. Maybe not he nicest way, but by far the easiest.
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} ${DEBUG_FLAGS}")
@@ -199,7 +189,6 @@ if(CMAKE_CUDA_COMPILER)
     # again only for arch... fuck NVIDIA
     include_directories(/opt/cuda/samples/cuda-samples/Common)
     include_directories(/usr/local/cuda/samples/cuda-samples/Common)
-    include_directories(/home/floyd.zweydinger/cuda-samples/Common)
     include_directories(/opt/cuda/include)
     include_directories(deps/cudacommon)
     include_directories(deps/cuCollections/include)
@@ -235,12 +224,7 @@ if(CMAKE_CUDA_COMPILER)
 endif()
 
 # include every subpackage which is included in `cryptanalysislib`
-include_directories("deps/cryptanalysislib/deps/fplll/")
 include_directories("deps/cryptanalysislib/deps/b63/include/b63")
-include_directories("deps/cryptanalysislib/deps/m4ri/m4ri")
-include_directories("deps/cryptanalysislib/deps/m4ri")
-include_directories("deps/cryptanalysislib/deps/ska_sort")
-include_directories("deps/cryptanalysislib/deps/Static-Sort/include")
 include_directories("deps/cryptanalysislib/src")
 
 include_directories("src")
@@ -248,12 +232,15 @@ include_directories("test/decoding/challenges")
 include_directories("test/mceliece/challenges")
 include_directories("/usr/local/include")
 
-link_directories("deps/cryptanalysislib/build")
-link_directories("deps/cryptanalysislib/deps/m4ri/.libs")
 link_directories("/usr/local/lib")
 
-add_subdirectory(test)
-add_subdirectory(bench)
+#TODO 
+# if (benchmark_FOUND)
+# 	add_subdirectory(bench)
+# endif()
+if (GTest_FOUND)
+	add_subdirectory(tests)
+endif()
 
 add_custom_target(
     TOUCH
@@ -268,10 +255,9 @@ add_custom_target (
 
 
 # add the main target running our main algorithm
-add_executable(main main.cpp)
-target_link_libraries(main ${LINK_TEST_FLAGS})
+#TODO add_executable(main main.cpp)
+# target_link_libraries(main ${LINK_TEST_FLAGS})
 
-set(USE_PROFILE "0")
 if(USE_PROFILE)
 	add_executable(main_analysis1 main.cpp)
 	target_link_libraries(main_analysis1 ${LINK_TEST_FLAGS} -fprofile-instr-generate=code.profraw)

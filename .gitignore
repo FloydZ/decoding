@@ -12,6 +12,7 @@ build/
 compile_commands.json
 .vimspector.json
 main.h
+config.h
 
 # Created by .ignore support plugin (hsz.mobi)
 ### C++ template
