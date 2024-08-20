@@ -20,7 +20,7 @@ TEST(EnumHashMap, alloc) {
 	using V = CollisionType<T, uint16_t, p>;
 
 	constexpr static SimpleHashMapConfig s{.bucketsize=10u, .nrbuckets=1u<<l, .threads=1};
-	using HM = SimpleHashMap<T, V, s, Hash<T, 0, l>>;
+	using HM = SimpleHashMap<T, V, s, Hash<T, 0, l, 2>>;
 	HM *hm = new HM{};
 
 	static constexpr ConfigEnumHashMap config{k+l, p, l, 1};
@@ -38,7 +38,7 @@ TEST(EnumHashMap, enumeration_changelist) {
 	using V = CollisionType<T, uint16_t, p>;
 
 	constexpr static SimpleHashMapConfig s{.bucketsize=4u, .nrbuckets=1u<<l, .threads=1};
-	using HM = SimpleHashMap<T, V, s, Hash<T, 0, l>>;
+	using HM = SimpleHashMap<T, V, s, Hash<T, 0, l, 2>>;
 	HM *hm = new HM{};
 
 	static constexpr ConfigEnumHashMap config{k+l, p, l, 1, epsilon, false, true};
@@ -83,7 +83,7 @@ TEST(EnumHashMap, enumeration) {
 	using V = CollisionType<T, uint16_t, p>;
 
 	constexpr static SimpleHashMapConfig s{.bucketsize=10u, .nrbuckets=1u<<l, .threads=1};
-	using HM = SimpleHashMap<T, V, s, Hash<T, 0, l>>;
+	using HM = SimpleHashMap<T, V, s, Hash<T, 0, l, 2>>;
 	HM *hm = new HM{};
 
 	static constexpr ConfigEnumHashMap config{k+l, p, l, 1, epsilon};
@@ -117,7 +117,7 @@ TEST(EnumHashMap, enumeration_index) {
 	using V = CollisionType<T, uint32_t, 1>;
 
 	constexpr static SimpleHashMapConfig s{.bucketsize=10u, .nrbuckets=1u<<l, .threads=1};
-	using HM = SimpleHashMap<T, V, s, Hash<T, 0, l>>;
+	using HM = SimpleHashMap<T, V, s, Hash<T, 0, l, 2>>;
 	HM *hm = new HM{};
 
 	static constexpr ConfigEnumHashMap config{k+l, p, l, 1, true};
@@ -149,7 +149,7 @@ TEST(EnumHashMap, multithreaded_enumeration) {
 	using V = CollisionType<T, uint16_t, p>;
 
 	constexpr static SimpleHashMapConfig s{.bucketsize=10u, .nrbuckets=1u<<l, .threads=threads};
-	using HM = SimpleHashMap<T, V, s, Hash<T, 0, l>>;
+	using HM = SimpleHashMap<T, V, s, Hash<T, 0, l, 2>>;
 	HM *hm = new HM{};
 	hm->print();
 
@@ -190,7 +190,7 @@ TEST(CollisionHashMap, enumeration) {
 	using V = CollisionType<T, uint16_t, p>;
 
 	constexpr static SimpleHashMapConfig s{.bucketsize=10u, .nrbuckets=1u<<l, .threads=1};
-	using HM = SimpleHashMap<T, V, s, Hash<T, 0, l>>;
+	using HM = SimpleHashMap<T, V, s, Hash<T, 0, l, 2>>;
 	using HM_DataType = HM::data_type;
 	using HM_DataType_IndexType = HM_DataType::index_type;
 	HM *hm = new HM{};
@@ -249,7 +249,7 @@ TEST(CollisionHashMap, enumerationSIMD) {
 	using V = CollisionType<T, uint32_t, 1>;
 
 	constexpr static SimpleHashMapConfig s{.bucketsize=2u, .nrbuckets=1u<<l, .threads=1};
-	using HM = SimpleHashMap<T, V, s, Hash<T, 0, l>>;
+	using HM = SimpleHashMap<T, V, s, Hash<T, 0, l, 2>>;
 	using HM_DataType = HM::data_type;
 	using HM_DataType_IndexType = HM_DataType::index_type;
 	HM *hm = new HM{};
@@ -348,9 +348,9 @@ TEST(CollisionHashMapD3, enumeration) {
 	constexpr static SimpleHashMapConfig s1{.bucketsize=16u, .nrbuckets=1u<<l1, .threads=threads};
 	constexpr static SimpleHashMapConfig s2{.bucketsize=12u, .nrbuckets=1u<<l2, .threads=threads};
 	constexpr static SimpleHashMapConfig s3{.bucketsize=8u,  .nrbuckets=1u<<l3, .threads=threads};
-	using HM1 = SimpleHashMap<T, V1, s1, Hash<T, 0, l1>>;
-	using HM2 = SimpleHashMap<T, V2, s2, Hash<T, 0, l2>>;
-	using HM3 = SimpleHashMap<T, V3, s3, Hash<T, 0, l3>>;
+	using HM1 = SimpleHashMap<T, V1, s1, Hash<T, 0, l1, 2>>;
+	using HM2 = SimpleHashMap<T, V2, s2, Hash<T, 0, l2, 2>>;
+	using HM3 = SimpleHashMap<T, V3, s3, Hash<T, 0, l3, 2>>;
 	HM1 *hm1 = new HM1{};
 	HM2 *hm2 = new HM2{};
 	HM3 *hm3 = new HM3{};

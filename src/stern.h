@@ -3,7 +3,7 @@
 
 #include <cstdint>
 
-#include "matrix/binary_matrix.h"
+#include "matrix/matrix.h"
 #include "container/hashmap.h"
 #include "popcount/popcount.h"
 #include "math/bc.h"
@@ -11,6 +11,7 @@
 #include "hash/simple.h"
 #include "mitm.h"
 #include "isd.h"
+#include "random.h"
 
 using namespace cryptanalysislib;
 
@@ -104,7 +105,7 @@ public:
 			bucketsize, nrbuckets, config.threads
 	};
 
-	using HM = SimpleHashMap<keyType, V1, simpleHashMapConfig, Hash<l_type, 0, l>>;
+	using HM = SimpleHashMap<keyType, V1, simpleHashMapConfig, Hash<l_type, 0, l, 2>>;
 	HM *hm;
 
 	constexpr static ConfigEnumHashMap configEnum{config};
@@ -219,8 +220,8 @@ public:
 		for (size_t cindex = 0; cindex < final_list_current_size/8; cindex++) {
 			ASSERT(cindex < final_list_left.size());
 
-			const uint32x8_t left  = uint32x8_t::load(final_list_left256  + cindex);
-			const uint32x8_t right = uint32x8_t::load(final_list_right256 + cindex);
+			const uint32x8_t left  = uint32x8_t::load((uint32_t *)(final_list_left256  + cindex));
+			const uint32x8_t right = uint32x8_t::load((uint32_t *)(final_list_right256 + cindex));
 
 			biject_simd<baselist_enumeration_length, p>(left, rows1);
 			biject_simd<baselist_enumeration_length, p>(right, rows2);
@@ -375,4 +376,5 @@ public:
 		          << " }" << std::endl;
 	}
 };
+
 #endif//DECODING_STERN_H

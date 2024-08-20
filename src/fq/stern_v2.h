@@ -3,10 +3,8 @@
 
 #include "helper.h"
 #include "container/fq_vector.h"
-#include "matrix/fq_matrix.h"
+#include "matrix/matrix.h"
 #include "list/list.h"
-#include "list/enumeration/fq.h"
-#include "sort.h"
 #include "popcount/popcount.h"
 #include "mitm.h"
 #include "isd.h"

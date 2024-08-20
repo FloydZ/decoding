@@ -1,7 +1,7 @@
 #ifndef DECODING_BJMM_H
 #define DECODING_BJMM_H
 
-#include "matrix/binary_matrix.h"
+#include "matrix/matrix.h"
 #include "container/hashmap.h"
 #include "popcount/popcount.h"
 #include "math/bc.h"
@@ -120,8 +120,8 @@ public:
 	constexpr static SimpleHashMapConfig simpleHashMapConfigD2 {
 			HM2_bucketsize, HM2_nrbuckets, config.threads
 	};
-	using HM1 = SimpleHashMap<keyType, V1, simpleHashMapConfig, Hash<l_type, 0, l1>>;
-	using HM2 = SimpleHashMap<keyType, V2, simpleHashMapConfigD2, Hash<l_type, 0, l2>>;
+	using HM1 = SimpleHashMap<keyType, V1, simpleHashMapConfig, Hash<l_type, 0, l1, 2>>;
+	using HM2 = SimpleHashMap<keyType, V2, simpleHashMapConfigD2, Hash<l_type, 0, l2, 2>>;
 	HM1 *hm1; HM2 *hm2;
 
 	constexpr static ConfigEnumHashMap configEnum{config};

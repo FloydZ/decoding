@@ -3,9 +3,8 @@
 
 #include "helper.h"
 #include "container/fq_vector.h"
-#include "matrix/fq_matrix.h"
+#include "matrix/matrix.h"
 #include "list/list.h"
-#include "list/enumeration/fq.h"
 #include "sort.h"
 #include "popcount/popcount.h"
 #include "mitm.h"
@@ -51,7 +50,8 @@ public:
 	constexpr static uint32_t enum_length = (k + l) >> 1u;
 	constexpr static uint32_t enum_offset = k + l - enum_length;
 	constexpr static size_t list_size = compute_combinations_fq_chase_list_size<enum_length, q, p>();
-	using List = Parallel_List_FullElement_T<Element>;
+	// using List = Parallel_List_FullElement_T<Element>;
+	using List = List_T<Element>;
 	using Generator = ListEnumerateMultiFullLength<List, enum_length, q, p>;
 	Generator G;
 	List *L1, *L2;
@@ -130,12 +130,12 @@ public:
 	}
 
 	///
-	inline void init_list(const uint32_t tid) {
+	inline void init_list(const uint32_t tid) noexcept {
 		hm->clear();
 
 		/// this call simply inits the the list
 		G.template run <HM, decltype(Compress), std::nullptr_t>
-				(L1, L2, enum_offset, tid, hm, &Compress);
+				(L1, L2, enum_offset, 0, tid, hm, &Compress);
 	}
 
 	void find_collisions(const uint32_t tid) {

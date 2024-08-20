@@ -3,7 +3,7 @@
 #include <tuple>
 
 #include "combination/chase.h"
-#include "matrix/binary_matrix.h"
+#include "matrix/matrix.h"
 #include "container/hashmap.h"
 #include "popcount/popcount.h"
 #include "math/bc.h"

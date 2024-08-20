@@ -1,6 +1,5 @@
 #ifndef DECODING_STERN_IM_H
 #define DECODING_STERN_IM_H
-
 #include <cstdint>
 
 #include "mitm.h"
