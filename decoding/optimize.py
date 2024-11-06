@@ -699,8 +699,10 @@ if __name__ == "__main__":
 
     problem = Problem(n=args.n, k=args.k, w=args.w, q=args.q)
 
-    d = Decoding(Algorithm[args.algorithm], problem, meta_params=args.meta_params, 
-                 algo_params=args.algo_param, H=args.H, syndrome=args.s)
+    d = Decoding(Algorithm[args.algorithm], problem, 
+                 meta_params=args.meta_params, 
+                 algo_params=args.algo_param, 
+                 H=args.H, syndrome=args.s)
     #print(d.optimize(None).min())
     d.set_build().optimize().write_config()#.build()
 

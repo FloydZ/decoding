@@ -119,6 +119,16 @@ class Matrix:
                 self.data[i][j] %= self.q
         return self
 
+    def sub(self, B: 'Matrix') -> 'Matrix':
+        """ simple inplace subtraction """
+        B_r, B_c = B.nrows, B.ncols
+        assert self.q == B.q and self.ncols == B_c and self.nrows == B_r
+        for i in range(self.nrows):
+            for j in range(self.ncols):
+                self.data[i][j] = self.data[i][j] + (self.q - B[i, j])
+                self.data[i][j] %= self.q
+        return self
+
     def transpose(self) -> 'Matrix':
         """ simple transpose """
         T = Matrix(self.ncols, self.nrows, q=self.q)
@@ -158,6 +168,15 @@ class Matrix:
             tmp = self.data[k][i]
             self.data[k][i] = self.data[k][j]
             self.data[k][j] = tmp
+
+    def __add__(self, B: 'Matrix'):
+        return self.add(B)
+
+    def __sub__(self, B: 'Matrix'):
+        return self.sub(B)
+
+    def __mul__(self, B: 'Matrix'):
+        return self.mul(B)
 
 
 if __name__ == "__main__":
