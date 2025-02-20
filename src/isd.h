@@ -1,6 +1,8 @@
 #ifndef DECODING_ISD_H
 #define DECODING_ISD_H
 
+#include <iostream>
+#include <fstream>
 
 #include "helper.h"
 #include "combination/chase.h"
@@ -163,6 +165,28 @@ public:
 		gaus_cycles = 0;
 	}
 
+    /// transate a syndrome decoding instance to a sat instance which is 
+    /// contains xor clauses. Hence they are only solvable by `Cryptominisat`
+    /// see: https://www.msoos.org/xor-clauses/
+    void to_sat(const char *filename) {
+        std::ofstream t(filename);
+        // TODO weight clause is missing: https://rbcborealis.com/research-blogs/tutorial-9-sat-solvers-i-introduction-and-applications/
+        for (uint32_t i = 0; i < (config.n-config.k); i++) {
+            t << "x";
+            for (uint32_t j = 0; j < config.n - 1u; j++) {
+                if (H[i][j]) {
+                    t << j << " ";
+                }
+            }
+
+            if (!s[i]) {
+                t << "-";
+            }
+
+            t << H[i][config.n-1u] << " 0\n";
+        }
+    }
+
 	/// important: dont rename it
 	virtual constexpr void print() const noexcept {
 		std::cout << "{ \"ghz\": " << ghz
@@ -216,7 +240,8 @@ public:
 		return ret;
 	}
 
-	constexpr void from_string(const char *H, const char *S) noexcept {
+	constexpr void from_string(const char *H,
+                               const char *S) noexcept {
 		static_assert(config.l < config.n-config.k);
 		PCMatrixOrg_T AT(H);
 		PCMatrixOrg_T::transpose(A, AT);
@@ -237,10 +262,10 @@ public:
 	// generate a random instance
 	constexpr void random() noexcept {
 		uint32_t rank = 0;
-		while (rank < n-k){
+		while (rank < config.n-config.k){
 			A.random();
 			rank = A.gaus();
-			rank = A.fix_gaus(P, rank, n-k);
+			rank = A.fix_gaus(P, rank, config.n-config.k);
 		}
 
 		e.random_row_with_weight(0, config.w);
@@ -255,9 +280,11 @@ public:
 		for (uint32_t i = 0; i < config.n; ++i) {
 			wA.set(1, config.n-config.k, i);
 		}
-		wA.set(w%2u, config.n-config.k, config.n);
+		wA.set(config.w%2u, config.n-config.k, config.n);
 	}
 
+    ///
+    /// TODO explain
 	template<const bool transpose=true,
 	         const bool swap=true,
 	         const bool sub=true>

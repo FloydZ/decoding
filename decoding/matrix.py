@@ -23,6 +23,7 @@ class Matrix:
 
     def print(self, tranpose: bool = False):
         """ printing """
+        print("nrows:", self.nrows, ", ncols:", self.ncols)
         for i in range(self.nrows):
             for j in range(self.ncols):
                 print(self.data[i][j], end='')
@@ -36,6 +37,26 @@ class Matrix:
                 self.data[i][j] = 0
         return self
 
+    def from_string(self, d: str, transposed: bool = True) -> 'Matrix':
+        """ reads line by line
+        """
+        if transposed:
+            D = Matrix(self.ncols, self.nrows, self.q)
+        else:
+            D = self 
+        for i in range(self.nrows):
+            for j in range(self.ncols):
+                if transposed:
+                    t = int(d[j*self.nrows+ i])
+                    D.data[j][i] = t 
+                else:
+                    t = int(d[i*self.ncols+ j])
+                    D.data[i][j] = t 
+
+        if transposed:
+            self = D.transpose()
+        return self
+        
     def random(self) -> 'Matrix':
         """ generates a random matrix """
         for i in range(self.nrows):
