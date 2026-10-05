@@ -21,8 +21,9 @@ class Matrix:
         assert x < self.nrows and y < self.ncols
         return self.data[x][y]
 
-    def print(self, tranpose: bool = False):
+    def print(self, transpose: bool = False):
         """ printing """
+        print("nrows:", self.nrows, ", ncols:", self.ncols)
         for i in range(self.nrows):
             for j in range(self.ncols):
                 print(self.data[i][j], end='')
@@ -36,6 +37,26 @@ class Matrix:
                 self.data[i][j] = 0
         return self
 
+    def from_string(self, d: str, transposed: bool = True) -> 'Matrix':
+        """ reads line by line
+        """
+        if transposed:
+            D = Matrix(self.ncols, self.nrows, self.q)
+        else:
+            D = self 
+        for i in range(self.nrows):
+            for j in range(self.ncols):
+                if transposed:
+                    t = int(d[j*self.nrows+ i])
+                    D.data[j][i] = t 
+                else:
+                    t = int(d[i*self.ncols+ j])
+                    D.data[i][j] = t 
+
+        if transposed:
+            self = D.transpose()
+        return self
+        
     def random(self) -> 'Matrix':
         """ generates a random matrix """
         for i in range(self.nrows):
@@ -80,7 +101,7 @@ class Matrix:
             if sel == -1:
                 return row
 
-            self.__swap_rows(sel, row)
+            self.swap_rows(sel, row)
 
             # solve remaining coordinates
             for i in range(self.nrows):
@@ -119,6 +140,16 @@ class Matrix:
                 self.data[i][j] %= self.q
         return self
 
+    def sub(self, B: 'Matrix') -> 'Matrix':
+        """ simple inplace subtraction """
+        B_r, B_c = B.nrows, B.ncols
+        assert self.q == B.q and self.ncols == B_c and self.nrows == B_r
+        for i in range(self.nrows):
+            for j in range(self.ncols):
+                self.data[i][j] = self.data[i][j] + (self.q - B[i, j])
+                self.data[i][j] %= self.q
+        return self
+
     def transpose(self) -> 'Matrix':
         """ simple transpose """
         T = Matrix(self.ncols, self.nrows, q=self.q)
@@ -141,7 +172,7 @@ class Matrix:
             t += self.data[j][col]
         return t
 
-    def __swap_rows(self, i: int, j: int) -> None:
+    def swap_rows(self, i: int, j: int) -> None:
         """ swap the rows i and j """
         assert i < self.nrows and j < self.nrows
         if i == j: return
@@ -150,7 +181,7 @@ class Matrix:
             self.data[i][k] = self.data[j][k]
             self.data[j][k] = tmp
 
-    def __swap_cols(self, i: int, j: int) -> None:
+    def swap_cols(self, i: int, j: int) -> None:
         """ swap the cols i and j """
         assert i < self.ncols and j < self.ncols
         if i == j: return
@@ -158,6 +189,15 @@ class Matrix:
             tmp = self.data[k][i]
             self.data[k][i] = self.data[k][j]
             self.data[k][j] = tmp
+
+    def __add__(self, B: 'Matrix'):
+        return self.add(B)
+
+    def __sub__(self, B: 'Matrix'):
+        return self.sub(B)
+
+    def __mul__(self, B: 'Matrix'):
+        return self.mul(B)
 
 
 if __name__ == "__main__":

@@ -412,6 +412,8 @@ class Decoding:
         """ creates a random parity check matrix and syndrome. 
         TODO: no guarantee of the existence of a solution is made.
         """
+        self.H = ""
+        self.syndrome = ""
         for _ in range(self.problem.n * (self.problem.n - self.problem.k)):
             self.H += str(random.randint(0, self.problem.q - 1))
         for _ in range(self.problem.n - self.problem.k):
@@ -699,8 +701,10 @@ if __name__ == "__main__":
 
     problem = Problem(n=args.n, k=args.k, w=args.w, q=args.q)
 
-    d = Decoding(Algorithm[args.algorithm], problem, meta_params=args.meta_params, 
-                 algo_params=args.algo_param, H=args.H, syndrome=args.s)
+    d = Decoding(Algorithm[args.algorithm], problem, 
+                 meta_params=args.meta_params, 
+                 algo_params=args.algo_param, 
+                 H=args.H, syndrome=args.s)
     #print(d.optimize(None).min())
     d.set_build().optimize().write_config()#.build()
 
