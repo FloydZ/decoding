@@ -21,18 +21,16 @@ stdenv.mkDerivation {
 	gbenchmark 
 	git 
 	cmake
-	clang_17
-    clang-tools_17
-    llvmPackages_17.openmp
-    llvm_17
+	clang
+    clang-tools
+    llvmPackages.openmp
+    llvm
 	gcc
   ]++ (lib.optionals pkgs.stdenv.isLinux ([
    	flamegraph
    	gdb
-    linuxKernel.packages.linux_6_6.perf
+    perf
    	pprof
    	valgrind
-   	massif-visualizer
-    #TODO cudatoolkit
   ]));
 }
