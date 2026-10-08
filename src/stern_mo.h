@@ -28,7 +28,7 @@ public:
 	void print() const noexcept {
 		ConfigISD::print();
 		std::cout << "{ "
-		          << ", \"r\": " << r
+		          << "\"r\": " << r
 				  << ", \"N\": " << N
 				  << ", \"dk\": " << dk
 				  << ", \"nnk\": " << nnk
@@ -87,6 +87,11 @@ public:
 		algo.L2 = (NNElement *)stern_MO_L2;
 	}
 
+	~SternMO() noexcept {
+		free(stern_MO_L1);
+		free(stern_MO_L2);
+	}
+
 	/// reconstruct the solution
 	void __attribute__ ((noinline))
 	reconstruct() {
@@ -98,7 +103,7 @@ public:
 		bool foundl = false, foundr = false;
 
 		for (size_t i = 0; i < list_enumeration_size; i++) {
-			biject<k, p>(i, rows);
+			biject<list_enumeration_length, p>(i, rows);
 			bool correctl = true;
 			bool correctr = true;
 
@@ -136,6 +141,8 @@ public:
 
 		ASSERT(foundl);
 		ASSERT(foundr);
+		(void)foundl;
+		(void)foundr;
 
 		Error tmpe, tmpe2;
 		Label tmp; tmp.zero();
@@ -146,15 +153,12 @@ public:
 			Label::add(tmp.ptr(), tmp.ptr(), HT.row(solutions[i]));
 		}
 
-		tmp.print();
-
 		// reversing and shit
 		for (uint32_t i = 0; i < n-k; ++i) {
 			const auto bit = tmp.get(i);
 			tmpe.set(bit, 0, n-k-1-i);
 		}
 
-		tmpe.print();
 		for (uint32_t i = 0; i < 2*p; ++i) {
 			ASSERT(n-k-l + solutions[i] < n);
 			tmpe.set(1, 0, n-k-l + solutions[i]);
@@ -173,7 +177,7 @@ public:
 		alignas(32) uint16_t rows[p];
 
 		for (size_t i = 0; i < list_enumeration_size; i++) {
-			biject<k, p>(i, rows);
+			biject<list_enumeration_length, p>(i, rows);
 			tmpl.zero(); tmpr = ws;
 
 			#pragma unroll
@@ -214,7 +218,10 @@ public:
 			apply_nearest_neighbour();
 		}
 
-		reconstruct();
+		// `reconstruct` asserts that a solution exists
+		if (!not_found) {
+			reconstruct();
+		}
 		return loops;
 	}
 

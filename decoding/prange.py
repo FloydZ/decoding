@@ -4,7 +4,10 @@ from subprocess import Popen, PIPE, STDOUT
 from pysat.card import *
 import urllib.request
 import random
-from matrix import *
+try:
+    from .matrix import Matrix
+except ImportError:  # executed as a script
+    from matrix import Matrix
 # from optimize import *
 
 
@@ -53,7 +56,7 @@ def parse_decodingchallenge(lines):
     
     for e in H:
         H2.append(e.strip("\n"))
-    return n, k, w, q, "".join(H2).strip("'n"), s
+    return n, k, w, q, "".join(H2).strip("\n"), s
 
 
 def get_decodingchallenge(url: str):
@@ -89,15 +92,16 @@ def parse_solution(n: int, file="out.sol") -> Matrix:
     with open(file, 'r') as f:
         data = []
         for line in f.readlines():
-            if line[0] == "c": 
+            line = line.strip()
+            if not line or line[0] == "c":
                 continue
-            if line [0] == "s":
+            if line[0] == "s":
+                # NOTE: `readlines` keeps the trailing newline
                 assert line == "s SATISFIABLE"
                 continue
 
             line = line[2:]
-            s = line.split(" ")
-            data += [int(a) for a in s]
+            data += [int(a) for a in line.split()]
        
         for i in data:
             if i >= 1 and i <= n: 
@@ -110,16 +114,18 @@ def check_solution(H: Matrix, S: Matrix, file="out.sol"):
     :return true/false
     """
     e = parse_solution(H.ncols, file)
-    s = H*e.transpose()
-    s.transpose().print()
+    s = (H*e.transpose()).transpose()
+    s.print()
     S.print()
-    return s == S
+    # NOTE: `Matrix` has no `__eq__`, so `==` compared object identities
+    return s.data == S.data
 
 
-def bruteforce(H: Matrix, S: Matrix, file="out.sol"):
+def bruteforce(H: Matrix, S: Matrix, w: int, file="out.cnf"):
     """
     worse then prange
     """
+    n = H.ncols
     clauses = [[str(i+1) for i, d in enumerate(row) if d !=0 ] for row in H.data]
     out = ""
     for i, c in enumerate(clauses):
@@ -128,7 +134,6 @@ def bruteforce(H: Matrix, S: Matrix, file="out.sol"):
         else: out += " -" + c[-1] + " 0\n"
     
     cnf = CardEnc.atmost(lits=list(range(1, n+1)), bound=w)
-    file = "out.cnf"
     cnf.to_file(file)
     with open(file, 'r') as original:
         data = original.read()
@@ -139,17 +144,17 @@ def bruteforce(H: Matrix, S: Matrix, file="out.sol"):
 def random_permutation(H: Matrix, P):
     assert len(P) == H.ncols
     for i in range(len(P)):
-        pos = random.randint(i, n-1)
+        pos = random.randint(i, len(P)-1)
         H.swap_cols(i, pos)
         P[i], P[pos] = P[pos], P[i]
 
 
-def prange(H: Matrix, S: Matrix, file="out.sol"):
+def prange(H: Matrix, S: Matrix, w: int, file="out.cnf"):
     n = H.ncols
     nk = H.nrows
+    k = n - nk
     P = list(range(n))
 
-    file = "out.cnf"
     seconds = 30
     while 1:
         random_permutation(H, P)
@@ -176,11 +181,12 @@ def prange(H: Matrix, S: Matrix, file="out.sol"):
     # TODO reconstruct
 
 
-#url = "https://decodingchallenge.org/Challenges/SD/SD_100_0"
-url = "https://decodingchallenge.org/Challenges/Goppa/Provider0/old_rng/Goppa_156"
-n, k, w, q, H, s = get_decodingchallenge(url)
-H = Matrix(n-k, n, 2).from_string(H);
-S = Matrix(1, n-k, 2).from_string(s);
-#print(n,k,w,q)
-#assert(check_solution(H, S, "out.sol"))
-prange(H, S)
+if __name__ == "__main__":
+    #url = "https://decodingchallenge.org/Challenges/SD/SD_100_0"
+    url = "https://decodingchallenge.org/Challenges/Goppa/Provider0/old_rng/Goppa_156"
+    n, k, w, q, H, s = get_decodingchallenge(url)
+    H = Matrix(n-k, n, 2).from_string(H)
+    S = Matrix(1, n-k, 2).from_string(s)
+    #print(n,k,w,q)
+    #assert(check_solution(H, S, "out.sol"))
+    prange(H, S, w)

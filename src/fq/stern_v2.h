@@ -107,6 +107,7 @@ public:
 
 	/// free all the memory
 	~FqSternV2() {
+		free(lHT);
 		delete hm;
 	}
 
@@ -145,8 +146,8 @@ public:
 				not_found = false;
 				cycles = cpucycles() - cycles;
 				for (uint16_t j = 0; j < p; ++j) {
-					solutions[j*p + 0] = left[j];
-					solutions[j*p + 1] = right[j];
+					solutions[j]     = left[j];
+					solutions[p + j] = right[j];
 				}
 
 				cfls = 0;
@@ -160,6 +161,7 @@ public:
 
 	///
 	inline void init_list(const uint32_t tid) {
+		(void)tid; // TODO multithreading
 		hm->clear();
 
 		l_type tmp = 0;
@@ -180,6 +182,7 @@ public:
 	}
 
 	void find_collisions(const uint32_t tid) {
+		(void)tid; // TODO multithreading
 		l_type tmp = syndrome;
 		for (uint32_t i = 0; i < p; ++i) {
 			tmp = Label::template add_T<l_type>(tmp, lHT[i]);
@@ -228,7 +231,6 @@ public:
 			tmpe.set(label_solution_to_recover.get(l + i), 0, (n-k-l) - i - 1);
 		}
 
-		tmpe.print();
 		for (uint32_t i = 0; i < k+l; ++i) {
 			tmpe.set(value_solution_to_recover.get(i), 0, (n-k-l)+i);
 		}
@@ -267,4 +269,4 @@ public:
 		return loops;
 	}
 };
-#endif//DECODING_FQ_STERN_H
+#endif//DECODING_FQ_STERNV2_H

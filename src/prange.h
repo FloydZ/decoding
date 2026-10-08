@@ -1,5 +1,5 @@
-#ifndef DECODING_STERN_H
-#define DECODING_STERN_H
+#ifndef DECODING_PRANGE_H
+#define DECODING_PRANGE_H
 
 #include <cstdint>
 
@@ -89,4 +89,4 @@ public:
 	/// important. Dont rename it
 	void info() const noexcept {}
 };
-#endif//DECODING_STERN_H
+#endif//DECODING_PRANGE_H

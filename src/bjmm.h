@@ -107,10 +107,14 @@ public:
 	constexpr static size_t baselist_enumeration_length = (k+l)/2u;
 
 	// hashmap stuff
+	/// NOTE: the bucket sizes given in the config take precedence. Otherwise they
+	/// 	are derived from the base list size bc((k+l)/2, p) (and not bc(n, p)).
 	constexpr static uint64_t HM1_nrbuckets = 1u << l1;
-	constexpr static uint64_t HM1_bucketsize = bc(n, p) >> l1; // TODO I think mem leak
+	constexpr static uint64_t HM1_bucketsize = config.HM1_bucketsize ? config.HM1_bucketsize
+	        : std::max<uint64_t>(bc(kl_half, p) >> l1, 1u);
 	constexpr static uint64_t HM2_nrbuckets = 1u << l2;
-	constexpr static uint64_t HM2_bucketsize = (HM1_bucketsize*HM1_bucketsize) >> l2;
+	constexpr static uint64_t HM2_bucketsize = config.HM2_bucketsize ? config.HM2_bucketsize
+	        : std::max<uint64_t>((HM1_bucketsize*HM1_bucketsize) >> l2, 1u);
 
 	using V1 = CollisionType<l_type, uint16_t, 1*p>;
 	using V2 = CollisionType<l_type, uint16_t, 2*p>;
@@ -133,9 +137,11 @@ public:
 	/// NOTE: that we increase the size with about one bucket size to make sure that we can fully insert a bucket
 	// TODO think about the formular
 	constexpr static size_t final_list_real_max_size = (final_list_max_size + HM2_bucketsize*HM2_bucketsize) + ((8u - ((final_list_max_size + HM2_bucketsize*HM2_bucketsize)%8u))%8u);
-	alignas(256) std::array<uint16_t[4], final_list_real_max_size> final_list;
+	alignas(256) std::array<uint16_t[4*p], final_list_real_max_size> final_list;
 
 	BJMM() noexcept {
+		ISD::expected_loops = config.compute_loops();
+
 		constexpr size_t size_lHT = roundToAligned<1024>(sizeof(l_type) * (k+l));
 		lHT =(l_type *)cryptanalysislib::aligned_alloc(1024, size_lHT);
 		ASSERT(lHT);
@@ -283,7 +289,7 @@ public:
 				(void) a1;
 				(void) a2;
 
-				for (uint32_t i = 0; i < 4; ++i) {
+				for (uint32_t i = 0; i < 4*p; ++i) {
 					final_list[final_list_current_size][i] = index1[i];
 				}
 				final_list_current_size += 1;
@@ -299,7 +305,7 @@ public:
 			bEnum->step(0, tid, simd);
 
 			l_type iT1 = 0;
-			for (uint32_t loops = 0; loops < config.intermediate_loops; ++loops, iT1 += 1) {
+			for (uint32_t il = 0; il < config.intermediate_loops; ++il, iT1 += 1) {
 				// generate a random intermediate target, except for the fact
 				// that we are not completely randomly choosing it. Because
 				// there is a good chance that we are choosing two distinct
@@ -336,7 +342,7 @@ public:
 				  << ", \"NR_HT_T_LIMBS\": " << NR_HT_T_LIMBS
 				  << ", \"load_per_bucket1\": " << load_per_bucket1
 				  << ", \"load_per_bucket2\": " << load_per_bucket2
-				  << std::endl;
+				  << " }" << std::endl;
 	}
 };
 

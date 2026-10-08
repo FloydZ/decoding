@@ -45,7 +45,7 @@ algos = [
         "config_name": "ConfigStern",
         "class_name": "Stern",
         "parameters": [
-            { "fls": { "help": "final_list_size"}}, 
+            { "fls": { "help": "final_list_size", "cpp": "final_list_size"}}, 
         ]
     },
     {
@@ -54,7 +54,7 @@ algos = [
         "config_name": "ConfigSternIM",
         "class_name": "SternIM",
         "parameters": [
-            { "v": { "help": "nr of views"}}, 
+            { "v": { "help": "nr of views", "cpp": "nr_views"}}, 
         ]
     },
     {
@@ -63,7 +63,7 @@ algos = [
         "config_name": "ConfigSternMO",
         "class_name": "SternMO",
         "parameters": [
-            { "v": { "help": "nr of views"}}, 
+            { "v": { "help": "nr of views", "cpp": "nr_views"}}, 
             { "r": { "help": ""}}, 
             { "N": { "help": ""}}, 
             { "dk": { "help": ""}}, 
@@ -77,9 +77,9 @@ algos = [
         "class_name": "BJMM",
         "parameters": [
             { "l1": { "help": ""}}, 
-            { "hm1_bs": { "help": "bucketsize"}}, 
-            { "hm2_bs": { "help": "bucketsize"}}, 
-            { "fls": { "help": "final_list_size"}}, 
+            { "hm1_bs": { "help": "bucketsize", "cpp": "HM1_bucketsize"}}, 
+            { "hm2_bs": { "help": "bucketsize", "cpp": "HM2_bucketsize"}}, 
+            { "fls": { "help": "final_list_size", "cpp": "final_list_size"}}, 
         ]
     },
     {
@@ -95,8 +95,11 @@ algos = [
     },
 ]
 
-def create_subparsers(parser):
+def create_subparsers(subparsers):
     for algo in algos:
+        # only offer algorithms which can be selected via `Algorithm[...]`
+        if algo["name"] not in Algorithm.__members__:
+            continue
         sp = subparsers.add_parser(algo["name"], help=algo["description"])
         for param in algo["parameters"]:
             k = list(param.keys())[0]
@@ -231,7 +234,7 @@ def parse_decodingchallenge(lines):
     
     for e in H:
         H2.append(e.strip("\n"))
-    return n, k, w, q, "".join(H2).strip("'n"), s
+    return n, k, w, q, "".join(H2).strip("\n"), s
 
 
 def get_decodingchallenge(url: str):
@@ -444,19 +447,24 @@ constexpr uint32_t q = {q};
             for k, v in config.items():
                 f.write("constexpr uint32_t {k} = {v};\n".format(k=k, v=str(v)))
             
-            f.write("static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=p,.l=l,.c=c,.threads=t};")
+            f.write("static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=q,.w=w,.p=p,.l=l,.c=c,.threads=t};\n")
 
             assert self.__algorithm_description is not None
-            f.write("static constexpr {config_name} config{"
+            # NOTE: `{{`/`}}` are needed to emit literal braces with `format`
+            f.write("static constexpr {config_name} config{{isdConfig, "
                     .format(config_name=self.__algorithm_description["config_name"]))
-            for k, _ in self.__algorithm_description["parameters"]:
-                f.write(".{k}={v},".format(k=k, v=config[k]))
-            f.write("};")
+            # every parameter is a dict with a single key: {"fls": {...}}
+            for param in self.__algorithm_description["parameters"]:
+                k = next(iter(param))
+                if k in config:
+                    cpp_name = param[k].get("cpp", k)
+                    f.write(".{k}={v},".format(k=cpp_name, v=config[k]))
+            f.write("};\n")
 
-            f.write("""auto get_algorithm() noexcept
-    {class_name}<isdConfig, config> algo{};
+            f.write("""auto get_algorithm() noexcept {{
+    {class_name}<isdConfig, config> algo{{}};
     return algo;
-}
+}}
 """.format(class_name=self.__algorithm_description["class_name"]))
 
         return self
@@ -474,13 +482,13 @@ constexpr uint32_t q = {q};
         cmd = Decoding.cmake_executable + ["-B", self.tmp_project_dir, 
                "-DCMAKE_BUILD_TYPE={t}".format(t=t), "-S", self.source_dir]
         p = Popen(cmd, stdin=PIPE, stdout=PIPE, stderr=STDOUT)
-        p.wait()
+        # NOTE: `communicate` instead of `wait`, which can deadlock on a full pipe
+        out, _ = p.communicate()
 
-        if p.returncode != 0 and p.returncode is not None:
+        if p.returncode != 0:
             self.__successful_build = False
-            assert p.stdout
-            print("couldn't execute: %s", " ".join(cmd))
-            print(p.stdout.read())
+            print("couldn't execute:", " ".join(cmd))
+            print(out.decode("utf-8"))
             return self
             
         self.__successful_build = True
@@ -504,17 +512,17 @@ constexpr uint32_t q = {q};
         cmd = Decoding.cmake_executable + ["--build", self.tmp_project_dir, 
                                            "--target", "main",]
         p = Popen(cmd, stdin=PIPE, stdout=PIPE, stderr=STDOUT)
-        p.wait()
+        out, _ = p.communicate()
 
-        assert p.stdout
-        if p.returncode != 0 and p.returncode is not None:
-            print("couldn't execute: %s", " ".join(cmd))
+        if p.returncode != 0:
+            # otherwise `run()` would execute an old binary
+            self.__successful_build = False
+            print("couldn't execute:", " ".join(cmd))
             print("error msg:")
-            print(p.stdout.read())
+            print(out.decode("utf-8"))
             return self
         
-        self.__build_output = p.stdout.readlines()
-        self.__build_output = [d.decode("utf-8").strip("\n") for d in self.__build_output]
+        self.__build_output = out.decode("utf-8").splitlines()
         return self
 
     def optimize(self, params=None):
@@ -541,7 +549,8 @@ constexpr uint32_t q = {q};
         if params is not None:
             self.params = params
 
-        if self.params is None:
+        # NOTE: `self.params` is initialized to `[]`, never `None`
+        if not self.params:
             # if no parameters are give we simply run the theoretic optimizer 
             # and output its runtime. Note: if the `build()` flag is set we 
             # additionally build the optimal parameters and run them.
@@ -615,17 +624,15 @@ constexpr uint32_t q = {q};
 
         cmd = [self.tmp_project_dir + "/main"] # TODO
         p = Popen(cmd, stdin=PIPE, stdout=PIPE, stderr=STDOUT)
-        p.wait()
+        out, _ = p.communicate()
 
-        assert p.stdout
-        if p.returncode != 0 and p.returncode is not None:
+        if p.returncode != 0:
             self.__successful_build = False
-            print("couldn't execute: %s", " ".join(cmd))
-            print(p.stdout.read())
+            print("couldn't execute:", " ".join(cmd))
+            print(out.decode("utf-8"))
             return self
             
-        self.__run_output = p.stdout.readlines()
-        self.__run_output = [d.decode("utf-8").strip("\n") for d in self.__run_output]
+        self.__run_output = out.decode("utf-8").splitlines()
         return self
 
     def yolo(self):

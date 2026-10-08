@@ -70,14 +70,18 @@ find_package(benchmark)
 find_package(Git QUIET)
 
 # init the submodules
-FetchContent_Declare(
-	tracy
-	GIT_REPOSITORY 	https://github.com/wolfpld/tracy
-	GIT_TAG 		master
-	GIT_SHALLOW 	TRUE
-	GIT_PROGRESS 	TRUE
-)
-FetchContent_MakeAvailable(tracy)
+# NOTE: only download tracy if it is actually used. TODO: pin a release tag
+# instead of `master` to get reproducible builds.
+if(USE_TRACY)
+	FetchContent_Declare(
+		tracy
+		GIT_REPOSITORY 	https://github.com/wolfpld/tracy
+		GIT_TAG 		master
+		GIT_SHALLOW 	TRUE
+		GIT_PROGRESS 	TRUE
+	)
+	FetchContent_MakeAvailable(tracy)
+endif()
 
 # global include directories
 include_directories("deps/b63/include/b63")
@@ -90,14 +94,17 @@ link_directories("/usr/local/lib")
 # two possible options. 'tcmalloc' is the standard google malloc implementation
 if(USE_TCMALLOC)
 	message(STATUS "Using tcmalloc")
-	set(MALLOC_LIBRARY_FLAGS "tcmalloc")
+	# NOTE: the test targets link against `TCMALLOC_LIBRARIES`
+	set(TCMALLOC_LIBRARIES "tcmalloc")
 endif()
 
-#if(USE_SANITIZER AND COMPILER_SUPPORTS_SANITIZE_ADDRESS)
+# NOTE: `COMPILER_SUPPORTS_SANITIZE_ADDRESS` is not reliable (the check does not
+# pass the flag to the linker), hence only the option is checked.
+if(USE_SANITIZER)
 	message(STATUS "Using address sanitize")
 	# possible sanitizers = -fsanitize=[address,leak,thread,memory,undefined]
 	set(SANITIZER_FLAGS "-fsanitize=address -fsanitize=pointer-compare -fno-omit-frame-pointer")
-#endif()
+endif()
 
 if(USE_NOINLINE AND COMPILER_SUPPORTS_NO_INLINE)
 	message(STATUS "not inlining")
@@ -228,8 +235,8 @@ include_directories("deps/cryptanalysislib/deps/b63/include/b63")
 include_directories("deps/cryptanalysislib/src")
 
 include_directories("src")
-include_directories("test/decoding/challenges")
-include_directories("test/mceliece/challenges")
+include_directories("tests/decoding/challenges")
+include_directories("tests/mceliece/challenges")
 include_directories("/usr/local/include")
 
 link_directories("/usr/local/lib")
@@ -258,6 +265,15 @@ add_custom_target (
 #TODO add_executable(main main.cpp)
 # target_link_libraries(main ${LINK_TEST_FLAGS})
 
+# NOTE: there is currently no `main.cpp`. All targets below depend on it.
+if(NOT EXISTS ${CMAKE_SOURCE_DIR}/main.cpp)
+	if(USE_PROFILE OR USE_POLLY)
+		message(WARNING "USE_PROFILE/USE_POLLY need a `main.cpp`, which does not exist. Ignoring them.")
+	endif()
+	set(USE_PROFILE OFF)
+	set(USE_POLLY OFF)
+endif()
+
 if(USE_PROFILE)
 	add_executable(main_analysis1 main.cpp)
 	target_link_libraries(main_analysis1 ${LINK_TEST_FLAGS} -fprofile-instr-generate=code.profraw)
@@ -278,7 +294,8 @@ if(USE_PROFILE)
 	add_dependencies(main_profile2 LLVM_PROFDATA)
 endif()
 
-if (CMAKE_CXX_COMPILER_ID STREQUAL "clang")
+# NOTE: the compiler id is `Clang` (or `AppleClang`), never `clang`
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND EXISTS ${CMAKE_SOURCE_DIR}/main.cpp)
     add_executable(main_PGO_instrumentation_first main.cpp)
     target_compile_options(main_PGO_instrumentation_first PUBLIC -fprofile-instr-generate -DUSE_LOOPS=2)
     target_link_libraries(main_PGO_instrumentation_first ${LINK_TEST_FLAGS} -fprofile-instr-generate)

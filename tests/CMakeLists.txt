@@ -4,7 +4,7 @@ foreach(testfile ${TEST_SOURCES})
     string(REPLACE ".cpp" "" file ${filename})
     add_executable(${file} ${testfile})
 	target_link_libraries(${file} ${LINK_TEST_FLAGS})
-	add_test(AllTests ${file})
+	add_test(NAME ${file} COMMAND ${file})
 endforeach(testfile ${TEST_SOURCES})
 
 if(USE_CUDA)

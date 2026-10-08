@@ -58,14 +58,10 @@ public:
 			// ASSERT(G.element1.label.popcnt() == (w-p));
 			ASSERT(G.element1.value.popcnt() == p);
 
-			G.element1.label.print();
-			G.element1.value.print();
-
 			Label tmp;
 			Label::sub(tmp, ws, G.element1.label);
-			ws.print();
-			tmp.print();
-			ASSERT(tmp.popcnt() == (w-p));
+			// NOTE: the predicate in `run` accepts every weight <= w-p
+			ASSERT(tmp.popcnt() <= (w-p));
 			/// set e1 (get the label)
 			for (uint32_t i = 0; i < n-k; ++i) {
 				const auto data = tmp.get(i);

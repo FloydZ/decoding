@@ -66,7 +66,7 @@ public:
 
 		/// easy case
 		if constexpr (packed) {
-			constexpr __uint128_t mask = qbits*l == 128 ? __uint128_t(-1ull) : (__uint128_t(1ull) << (qbits*l)) - __uint128_t(1ull);
+			constexpr __uint128_t mask = qbits*l == 128 ? ~__uint128_t(0) : (__uint128_t(1ull) << (qbits*l)) - __uint128_t(1ull);
 			using TT = LogTypeTemplate<qbits*l>;
 
 			/// NOTE: that we fetch the first 128bits (and not the last, where we would assume
@@ -82,7 +82,7 @@ public:
 
 		#pragma unroll
 		for (uint32_t i = 0u; i < l; ++i) {
-			ret ^= (label.get(i) << (qbits*i));
+			ret ^= (__uint128_t(label.get(i)) << (qbits*i));
 		}
 
 		return ret;

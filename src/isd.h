@@ -3,6 +3,7 @@
 
 #include <iostream>
 #include <fstream>
+#include <vector>
 
 #include "helper.h"
 #include "combination/chase.h"
@@ -135,7 +136,7 @@ public:
 	const double ghz = std::max(osfreq(), 1.); // just to make sure we are not dividing by zero
 	uint64_t loops = 0, expected_loops = 0;
 	bool not_found = true;
-	uint64_t gaus_cycles = 0, extract_cycles = 0, cycles;
+	uint64_t gaus_cycles = 0, extract_cycles = 0, cycles = cpucycles();
 
 	/// some asserts
 	static_assert(config.epsilon <= ((config.l+config.k)/2));
@@ -163,27 +164,40 @@ public:
 		loops = 0;
 		cycles = cpucycles();
 		gaus_cycles = 0;
+		extract_cycles = 0;
 	}
 
     /// transate a syndrome decoding instance to a sat instance which is 
     /// contains xor clauses. Hence they are only solvable by `Cryptominisat`
     /// see: https://www.msoos.org/xor-clauses/
     void to_sat(const char *filename) {
+        static_assert(config.q == 2, "xor clauses only exist over F2");
         std::ofstream t(filename);
         // TODO weight clause is missing: https://rbcborealis.com/research-blogs/tutorial-9-sat-solvers-i-introduction-and-applications/
         for (uint32_t i = 0; i < (config.n-config.k); i++) {
-            t << "x";
-            for (uint32_t j = 0; j < config.n - 1u; j++) {
-                if (H[i][j]) {
-                    t << j << " ";
+            // NOTE: use the original matrix `A` (`H` only has k+l columns),
+            // and DIMACS variables are 1-based.
+            std::vector<uint32_t> vars;
+            for (uint32_t j = 0; j < config.n; j++) {
+                if (A.get(i, j)) {
+                    vars.push_back(j + 1u);
                 }
             }
 
-            if (!s[i]) {
-                t << "-";
+            // TODO an empty row with s[i] = 1 is unsatisfiable
+            if (vars.empty()) {
+                continue;
             }
 
-            t << H[i][config.n-1u] << " 0\n";
+            // `x1 2 3 0` encodes x1^x2^x3 = 1, negating one literal encodes = 0
+            t << "x";
+            for (size_t j = 0; j < vars.size(); j++) {
+                if ((j == vars.size() - 1u) && (!s.get(i, 0))) {
+                    t << "-";
+                }
+                t << vars[j] << " ";
+            }
+            t << "0\n";
         }
     }
 
@@ -207,8 +221,8 @@ public:
 		const double time      = double(cyc) / ghz;
 		const double gaus_proc = 100 * double(gaus_cycles) / double(cyc);
 		const double extract_proc = 100 * double(extract_cycles) / double(cyc);
-		const double tot_proc  = 100 * double(loops) / double(expected_loops);
-		const double lps       = double(loops) / time;
+		const double tot_proc  = expected_loops ? 100 * double(loops) / double(expected_loops) : 0.;
+		const double lps       = time > 0. ? double(loops) / time : 0.;
 
 		std::cout << "{ \"loops\": " << loops
 		          << ", \"sec\": " << time
@@ -240,12 +254,12 @@ public:
 		return ret;
 	}
 
-	constexpr void from_string(const char *H,
-                               const char *S) noexcept {
+	constexpr void from_string(const char *h_str,
+                               const char *s_str) noexcept {
 		static_assert(config.l < config.n-config.k);
-		PCMatrixOrg_T AT(H);
+		PCMatrixOrg_T AT(h_str);
 		PCMatrixOrg_T::transpose(A, AT);
-		s.from_string(S);
+		s.from_string(s_str);
 		PCMatrix::augment(wA, A, s);
 
 		if constexpr (config.parity_row) {
@@ -256,6 +270,7 @@ public:
 		if constexpr (config.c > 0) {
 			const uint32_t rank = wA.fix_gaus(P, wA.gaus(config.n-config.k), config.n-config.k-config.l);
 			ASSERT(rank >= config.n-config.k-config.l);
+			(void)rank;
 		}
 	}
 
@@ -298,8 +313,9 @@ public:
 			rank = wA.fix_gaus(P, rank, config.n-config.k-config.l);
 			ASSERT(rank >= config.n-config.k-config.l);
 		} else {
-			uint32_t rank = wA.template markov_gaus<config.c, config.n-config.k-config.l>(P);
+			const uint32_t rank = wA.template markov_gaus<config.c, config.n-config.k-config.l>(P);
 			ASSERT(rank >= config.n-config.k-config.l);
+			(void)rank;
 		}
 
 		gaus_cycles += cpucycles();
@@ -335,7 +351,8 @@ public:
 	/// Swaps all rows in H, e.g. H[0] <-> H[n-k], H[1] <-> H[n-k-1], ...
 	constexpr void swap_matrix() noexcept {
 		// NOTE: im swapping H, not HT
-		for (uint32_t i = 0; i < (config.n-config.k)/2u - ((config.n-config.k) % 2u); i++) {
+		// for odd n-k the middle row stays in place
+		for (uint32_t i = 0; i < (config.n-config.k)/2u; i++) {
 			H.swap_rows(i, config.n-config.k-1u-i);
 		}
 	}
@@ -350,7 +367,8 @@ public:
 		static_assert(packed);
 
 		if constexpr(offset == 0) {
-			constexpr TT mask = (1u << (q_bits*lprime)) - 1u;
+			static_assert(q_bits*lprime <= sizeof(TT)*8u);
+			constexpr TT mask = (q_bits*lprime == sizeof(TT)*8u) ? TT(-1) : TT((TT(1) << (q_bits*lprime)) - 1u);
 
 			for (uint32_t i = 0; i < config.k + config.l; i++) {
 				lHT[i] = HT.limb(i, 0) & mask;
@@ -369,13 +387,17 @@ public:
 	/// This is sadly needed because of the usage of `_mm256_i32gather_epi32`
 	/// and the fact the `M4RI` version I'm using is not using a continuously
 	/// memory block.
+	/// NOTE: every row in `pHT` is `ceil((n-k)*q_bits / bits(TT))` limbs of type
+	///		`TT` long, which is the layout the callers assume (`NR_HT_T_LIMBS`).
 	template<typename TT=limb_type>
 	constexpr void extract_pHT(TT *pHT) const noexcept {
-		const size_t bytes_length = HT.limbs_per_row() * sizeof(TT);
+		constexpr size_t limbs_per_row = ((config.n - config.k)*q_bits + sizeof(TT)*8u - 1u) / (sizeof(TT)*8u);
+		ASSERT(limbs_per_row * sizeof(TT) <= HT.limbs_per_row() * sizeof(limb_type));
 
 		#pragma unroll
 		for (uint32_t i = 0; i < config.k+config.l; i++) {
-			memcpy(pHT + i*HT.limbs_per_row(), HT[i], bytes_length);
+			// NOTE: the last argument is the number of `TT` elements, not bytes
+			cryptanalysislib::memcpy(pHT + i*limbs_per_row, (const TT *)HT[i], limbs_per_row);
 		}
 	}
 
@@ -392,12 +414,12 @@ public:
 			/// the loops have different endings.
 			for (uint16_t i = 0; i < lprime; i++) {
 				const auto bit = wA.get(config.n-config.k-offset-i-1, config.n);
-				syndrome ^= bit << i;
+				syndrome ^= LimbType(bit) << i;
 			}
 		} else {
 			for (uint16_t i = 0; i < lprime; i++) {
 				const auto bits = wA.get(config.n-config.k-offset-i-1, config.n);
-				syndrome ^= bits << (i * q_bits);
+				syndrome ^= LimbType(bits) << (i * q_bits);
 			}
 		}
 	}

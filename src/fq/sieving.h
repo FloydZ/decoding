@@ -118,7 +118,7 @@ public:
 
 		/// easy case
 		if constexpr (packed) {
-			constexpr __uint128_t mask = qbits*l == 128 ? __uint128_t(-1ull) : (__uint128_t(1ull) << (qbits*l)) - __uint128_t(1ull);
+			constexpr __uint128_t mask = qbits*l == 128 ? ~__uint128_t(0) : (__uint128_t(1ull) << (qbits*l)) - __uint128_t(1ull);
 			using TT = LogTypeTemplate<qbits*l>;
 
 			/// NOTE: that we fetch the first 128bits (and not the last, where we would assume
@@ -134,7 +134,7 @@ public:
 
 		#pragma unroll
 		for (uint32_t i = 0u; i < l; ++i) {
-			ret ^= (label.get(i) << (qbits*i));
+			ret ^= (__uint128_t(label.get(i)) << (qbits*i));
 		}
 
 		return ret;
@@ -147,6 +147,30 @@ public:
 		Label tmp = label;
 		tmp.neg();
 		return Compress(tmp);
+	}
+
+	/// \return the `window`-th block of `l` coordinates of `label`, compressed
+	/// 	into `qbits*l` bits. Window 0 uses `Compress`, as the base list is
+	/// 	inserted with it.
+	template<const uint32_t window>
+	constexpr inline static l_type CompressWindow(const Label &label) noexcept {
+		if constexpr (window == 0) {
+			return Compress(label);
+		}
+
+		static_assert(qbits*l <= sizeof(l_type)*8u);
+		l_type ret = 0;
+		for (uint32_t i = 0u; i < l; ++i) {
+			ret ^= l_type(label.get(window*l + i)) << (qbits*i);
+		}
+		return ret;
+	}
+
+	template<const uint32_t window>
+	constexpr inline static l_type NegateCompressWindow(const Label &label) noexcept {
+		Label tmp = label;
+		tmp.neg();
+		return CompressWindow<window>(tmp);
 	}
 
 	/// base constructor
@@ -162,6 +186,13 @@ public:
 		ASSERT(hm1 != nullptr && hm2 != nullptr);
 	}
 
+	~FqSieving() noexcept {
+		delete L1;
+		delete L2;
+		delete hm1;
+		delete hm2;
+	}
+
 	/// initialize the list L1. Additionally resets the hashmap `hm1`
 	/// regardless of the current ordering
 	void init_list(const uint32_t tid) {
@@ -171,7 +202,7 @@ public:
 
 		/// this call simply inits the the list
 		G.template run <HM, decltype(Compress), std::nullptr_t>
-				(L1, nullptr, 0, tid, hm1, &Compress);
+				(L1, nullptr, 0, 0, tid, hm1, &Compress);
 	}
 
 
@@ -180,7 +211,6 @@ public:
 	/// \return new list size
 	size_t sieving_final_step(const uint32_t tid) {
 		constexpr uint32_t citeration = sieving_steps-1;
-		constexpr uint32_t lower_l = lower_limit<citeration>();
 
 		/// reset stuff
 		hm2->clear();
@@ -196,10 +226,12 @@ public:
 
 			/// NOTE: the compressor negates the data, needed to be able
 			/// to search for exact matches.
-			l_type data1 = this->NegateCompress(L1->at(i).label);
+			l_type data1 = NegateCompressWindow<citeration>(L1->at(i).label);
 			IndexType pos1 = hm1->find(data1, load1);
+			const size_t end1 = pos1 + load1;
 
-			while (pos1 < load1) {
+			// NOTE: `find` returns the absolute position of the bucket
+			while (pos1 < end1) {
 				const IndexType index = hm1->ptr(pos1)[0];
 				pos1 += 1;
 				/// make sure that we do not create zeros or doubles
@@ -259,7 +291,6 @@ public:
 	/// \return new list size
 	template<const uint32_t citeration>
 	size_t sieving_step(const uint32_t tid) {
-		constexpr uint32_t lower_l_bit = lower_limit<citeration>();
 		constexpr uint32_t upper_l = (citeration+1)*l;
 
 		/// reset stuff
@@ -275,8 +306,8 @@ public:
 		for (size_t i = s_pos; i < e_pos; ++i) {
 			HM_LoadType load1;
 
-			/// NOTE: the compressor negates the data
-			l_type data1 = this->NegateCompress(L1->at(i).label);
+			/// NOTE: the compressor negates the data. Match on the current window
+			l_type data1 = NegateCompressWindow<citeration>(L1->at(i).label);
 
 			/// NOTE: maybe I can prepare data1 before hand?
 			IndexType pos1 = hm1->find(data1, load1);
@@ -312,15 +343,16 @@ public:
 				//std::cout << unsigned(data1) << " " << unsigned (hm1->__buckets[pos1-1].first) << std::endl << std::endl;
 
 				/// some assertions
-				for (uint32_t j = 0; j < upper_l; ++j) {
-					ASSERT(tmp.label[j] == 0);
+				for (uint32_t m = 0; m < upper_l; ++m) {
+					ASSERT(tmp.label[m] == 0);
 				}
 				ASSERT(tmp.value.popcnt() == 2*p);
 
 
-				/// insert this into the other list and hashmap
-				l_type data2 = Compress(tmp.label);
-				data2 >>= (citeration + 1) * l * qbits;
+				/// insert this into the other list and hashmap, keyed by the
+				/// next window. NOTE: `Compress` only returns the first window, so
+				/// shifting its result always gave zero.
+				l_type data2 = CompressWindow<citeration + 1>(tmp.label);
 				npos[0] = ctr;
 				hm2->insert(data2, npos, tid);
 				L2->at(ctr++) = tmp;
@@ -377,8 +409,7 @@ public:
 	/// \return number of loops needed
 	uint64_t __attribute__ ((noinline))
 	run() noexcept {
-		not_found = true;
-		loops = 0;
+		ISD::reset();
 		while (not_found && (loops < isd.loops)) {
 			ISD::step();
 
@@ -388,7 +419,7 @@ public:
 				init_list(tid);
 
 			    constexpr_for<0, sieving_steps - 1u, 1u>([this](auto i){
-				  sieving_step<i>(tid);
+				  this->template sieving_step<i>(tid);
 				});
 
 				if (current_list_size == 0) {
