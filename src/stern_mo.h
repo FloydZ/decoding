@@ -21,7 +21,7 @@ public:
 #ifdef EXPECTED_PERMUTATIONS
 		return EXPECTED_PERMUTATIONS;
 #else
-		return 1; // TODO
+		return bc(n, w)/( bc(n-k, w-2*p) * bc(k/2, p) * bc(k/2, p));
 #endif
 	}
 
@@ -87,10 +87,7 @@ public:
 		algo.L2 = (NNElement *)stern_MO_L2;
 	}
 
-	~SternMO() noexcept {
-		free(stern_MO_L1);
-		free(stern_MO_L2);
-	}
+	// NOTE: `stern_MO_L1/L2` are owned by `algo`, which frees them in `~NN`.
 
 	/// reconstruct the solution
 	void __attribute__ ((noinline))
@@ -110,7 +107,7 @@ public:
 			tmpl.zero(); tmpr = ws;
 
 			for (uint16_t j = 0; j < p; j++) {
-				ASSERT(rows[j] < kl_half);
+				assert(rows[j] < kl_half);
 				Label::add(tmpl.ptr(), tmpl.ptr(), HT[rows[j]]);
 				Label::add(tmpr.ptr(), tmpr.ptr(), HT[rows[j] + list_enumeration_length]);
 			}
@@ -123,7 +120,7 @@ public:
 			}
 
 			if (correctl) {
-				ASSERT(!foundl);
+				assert(!foundl);
 				foundl = true;
 				for (uint32_t j = 0; j < p; j++) {
 					solutions[j] = rows[j];
@@ -131,7 +128,7 @@ public:
 			}
 
 			if (correctr) {
-				ASSERT(!foundr);
+				assert(!foundr);
 				foundr = true;
 				for (uint32_t j = 0; j < p; j++) {
 					solutions[p + j] = rows[j] + list_enumeration_length;
@@ -139,8 +136,8 @@ public:
 			}
 		}
 
-		ASSERT(foundl);
-		ASSERT(foundr);
+		assert(foundl);
+		assert(foundr);
 		(void)foundl;
 		(void)foundr;
 
@@ -149,7 +146,7 @@ public:
 		// copy in the syndrome
 		tmp = ws;
 		for (uint32_t i = 0; i < 2*p; ++i) {
-			ASSERT(solutions[i] < k+l);
+			assert(solutions[i] < k+l);
 			Label::add(tmp.ptr(), tmp.ptr(), HT.row(solutions[i]));
 		}
 
@@ -160,7 +157,7 @@ public:
 		}
 
 		for (uint32_t i = 0; i < 2*p; ++i) {
-			ASSERT(n-k-l + solutions[i] < n);
+			assert(n-k-l + solutions[i] < n);
 			tmpe.set(1, 0, n-k-l + solutions[i]);
 		}
 
@@ -182,7 +179,7 @@ public:
 
 			#pragma unroll
 			for (uint16_t j = 0; j < p; j++) {
-				ASSERT(rows[j] < kl_half);
+				assert(rows[j] < kl_half);
 				Label::add(tmpl.ptr(), tmpl.ptr(), HT[rows[j]]);
 				Label::add(tmpr.ptr(), tmpr.ptr(), HT[rows[j] + list_enumeration_length]);
 			}

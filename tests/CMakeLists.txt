@@ -15,9 +15,9 @@ if(USE_CUDA)
 endif()
 
 
-# TODO add_subdirectory(decoding)
+add_subdirectory(decoding)
 add_subdirectory(mceliece)
-# TODO not implemented add_subdirectory(quasicyclic)
-# TODO add_subdirectory(lowweight)
-# TODO currently not implemented add_subdirectory(ternary)
+add_subdirectory(quasicyclic)
+add_subdirectory(lowweight)
+add_subdirectory(ternary)
 add_subdirectory(fq)

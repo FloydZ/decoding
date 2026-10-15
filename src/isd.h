@@ -3,19 +3,31 @@
 
 #include <iostream>
 #include <fstream>
+#include <functional>
+#include <sstream>
 #include <vector>
 
 #include "helper.h"
 #include "combination/chase.h"
 #include "simd/simd.h"
-#include "popcount/popcount.h"
+#include "algorithm/bits/popcount.h"
 #include "math/bc.h"
+#include "math/log.h"
 #include "container/hashmap.h"
 #include "nn/nn.h"
 #include "matrix/matrix.h"
 #include "element.h"
 
 using namespace cryptanalysislib;
+
+/// compares the weight `wt` of a solution candidate with the target weight `w`
+/// - `std::less`:    accepts wt <= w (syndrome decoding)
+/// - `std::greater`: accepts wt >= w (large weight syndrome decoding)
+/// \tparam Compare `std::less` or `std::greater`
+template<typename Compare>
+constexpr bool compare_weight(const uint32_t wt, const uint32_t w) noexcept {
+	return !Compare{}(w, wt);
+}
 
 struct ConfigISD {
 	// instance parameters
@@ -39,10 +51,10 @@ struct ConfigISD {
 	/// if true only the `packed` versions of the data containers are used
 	const bool packed = true;
 	const bool simd = false; // TODO enable
-	const bool parity_row = q == 2;
+	const bool parity_row = false; // TODO
 	const bool doom = false; // TODO
 
-	const uint32_t q_bits = bits_log2(q);
+	const uint32_t q_bits = ceil_log2(q);
 
 	// if this value is set to a different value then -1 the program will end the
 	// computation after `loops` permutation, regardless if it found the solution or not
@@ -58,6 +70,9 @@ struct ConfigISD {
 #else
 	const uint64_t print_loops  = 1ul << 12u;
 #endif
+
+	/// final comparison of the weight of a solution with `w`, see `compare_weight`
+	bool (*const compare)(uint32_t, uint32_t) = compare_weight<std::less<uint32_t>>;
 
 	void print() const noexcept {
 		std::cout << "{ \"n\": " << unsigned(n)
@@ -93,6 +108,7 @@ public:
 
 	using limb_type = LimbType;
 	using l_type = MinLogTypeTemplate<q_bits * config.l, 32>;
+	constexpr static uint32_t NR_HT_T_LIMBS = (config.n-config.k+(sizeof(l_type)*8) - 1u)/(sizeof(l_type)*8);
 
 	// matrix types
 	using PCMatrixOrg 	= FqMatrix<LimbType, config.n-config.k, config.n, config.q, packed>;
@@ -105,13 +121,13 @@ public:
 	using Syndrome 		= FqMatrix<LimbType, config.n-config.k, 1, config.q, packed>; // maybe transpose?
 
 	using Value = typename std::conditional<packed,
-			kAryPackedContainer_T<LimbType, config.k+config.l, config.q>,
-			kAryContainer_T<LimbType, config.k, config.q>
+			FqPackedVector<config.k+config.l, config.q, LimbType>,
+			FqNonPackedVector<config.k, config.q, LimbType>
 	>::type;
 
 	using Label = typename std::conditional<packed,
-			kAryPackedContainer_T<LimbType, config.n-config.k, config.q>,
-			kAryContainer_T<LimbType, config.n-config.k, config.q>
+			FqPackedVector<config.n-config.k, config.q, LimbType>,
+			FqNonPackedVector<config.n-config.k, config.q, LimbType>
 	>::type;
 	using Element       = Element_T<Value, Label, PCSubMatrix_T>;
 
@@ -127,7 +143,10 @@ public:
 
 	// this is dangerous for the syndrome
 	LimbType syndrome;
-	static_assert(config.l * bits_log2(config.q) <= sizeof(LimbType)*8);
+	static_assert(config.l * ceil_log2(config.q) <= sizeof(LimbType)*8);
+
+	/// l window of HT (`extract_lHT`) and HT in a continuous block (`extract_pHT`)
+	l_type *lHT, *pHT;
 
 	/// permutation
 	Permutation P{config.n};
@@ -143,6 +162,14 @@ public:
 	static_assert(config.l < (config.n-config.k));
 
 	constexpr ISDInstance() noexcept {
+		constexpr size_t size_lHT = roundToAligned<1024>(sizeof(l_type) * (config.k+config.l));
+		lHT =(l_type *)cryptanalysislib::aligned_alloc(1024, size_lHT);
+		assert(lHT);
+
+		constexpr size_t size_pHT = roundToAligned<1024>(sizeof(l_type) * (config.k+config.l) * NR_HT_T_LIMBS);
+		pHT =(l_type *)cryptanalysislib::aligned_alloc(1024, size_pHT);
+		assert(pHT);
+
 		/// warn the user if the internal datastructures are
 		/// not using a optimized arithmetic
 		if constexpr (!Label::optimized()) {
@@ -154,6 +181,8 @@ public:
 
 	virtual ~ISDInstance() {
 	     periodic_print();
+	     cryptanalysislib::aligned_free(lHT);
+	     cryptanalysislib::aligned_free(pHT);
 	};
 
 	virtual void info() const noexcept {};
@@ -172,8 +201,12 @@ public:
     /// see: https://www.msoos.org/xor-clauses/
     void to_sat(const char *filename) {
         static_assert(config.q == 2, "xor clauses only exist over F2");
-        std::ofstream t(filename);
-        // TODO weight clause is missing: https://rbcborealis.com/research-blogs/tutorial-9-sat-solvers-i-introduction-and-applications/
+        constexpr uint32_t n = config.n, w = config.w;
+        static_assert(w > 0);
+
+        // NOTE: buffered, the header needs the number of clauses
+        std::stringstream t;
+        uint64_t nr_clauses = 0;
         for (uint32_t i = 0; i < (config.n-config.k); i++) {
             // NOTE: use the original matrix `A` (`H` only has k+l columns),
             // and DIMACS variables are 1-based.
@@ -184,8 +217,12 @@ public:
                 }
             }
 
-            // TODO an empty row with s[i] = 1 is unsatisfiable
+            // an empty row with s[i] = 1 is unsatisfiable
             if (vars.empty()) {
+                if (s.get(i, 0)) {
+                    t << "0\n";
+                    nr_clauses += 1;
+                }
                 continue;
             }
 
@@ -198,7 +235,35 @@ public:
                 t << vars[j] << " ";
             }
             t << "0\n";
+            nr_clauses += 1;
         }
+
+        // weight clause: x_1 + ... + x_n <= w, sequential counter (Sinz 2005)
+        // NOTE: aux variable s_{i,j} is `n + (i-1)*w + j`
+        t << "-1 " << n + 1u << " 0\n";
+        nr_clauses += 1;
+        for (uint32_t j = 2; j <= w; j++) {
+            t << "-" << n + j << " 0\n";
+            nr_clauses += 1;
+        }
+        for (uint32_t i = 2; i < n; i++) {
+            const uint32_t si = n + (i - 1u)*w, sp = n + (i - 2u)*w;
+            t << "-" << i << " " << si + 1u << " 0\n";
+            t << "-" << sp + 1u << " " << si + 1u << " 0\n";
+            nr_clauses += 2;
+            for (uint32_t j = 2; j <= w; j++) {
+                t << "-" << i << " -" << sp + j - 1u << " " << si + j << " 0\n";
+                t << "-" << sp + j << " " << si + j << " 0\n";
+                nr_clauses += 2;
+            }
+            t << "-" << i << " -" << sp + w << " 0\n";
+            nr_clauses += 1;
+        }
+        t << "-" << n << " -" << n + (n - 2u)*w + w << " 0\n";
+        nr_clauses += 1;
+
+        std::ofstream f(filename);
+        f << "p cnf " << n + (n - 1u)*w << " " << nr_clauses << "\n" << t.str();
     }
 
 	/// important: dont rename it
@@ -235,7 +300,7 @@ public:
 
 	constexpr bool correct() const noexcept {
 		bool ret = true;
-		if (e.row_popcnt(0) > config.w){
+		if (!config.compare(e.row_popcnt(0), config.w)) {
 			ret = false;
 		}
 
@@ -269,7 +334,7 @@ public:
 		// needed for marcov
 		if constexpr (config.c > 0) {
 			const uint32_t rank = wA.fix_gaus(P, wA.gaus(config.n-config.k), config.n-config.k-config.l);
-			ASSERT(rank >= config.n-config.k-config.l);
+			assert(rank >= config.n-config.k-config.l);
 			(void)rank;
 		}
 	}
@@ -298,8 +363,9 @@ public:
 		wA.set(config.w%2u, config.n-config.k, config.n);
 	}
 
-    ///
-    /// TODO explain
+    /// one iteration: permute + gaus `wA`, then optionally
+    /// \tparam sub extract `H` \tparam swap reverse its rows \tparam transpose into `HT`
+    /// NOTE: always extracts the syndrome `ws`
 	template<const bool transpose=true,
 	         const bool swap=true,
 	         const bool sub=true>
@@ -311,10 +377,10 @@ public:
 			wA.permute_cols(wAT, P);
 			uint32_t rank = wA.gaus(config.n-config.k-config.l);
 			rank = wA.fix_gaus(P, rank, config.n-config.k-config.l);
-			ASSERT(rank >= config.n-config.k-config.l);
+			assert(rank >= config.n-config.k-config.l);
 		} else {
 			const uint32_t rank = wA.template markov_gaus<config.c, config.n-config.k-config.l>(P);
-			ASSERT(rank >= config.n-config.k-config.l);
+			assert(rank >= config.n-config.k-config.l);
 			(void)rank;
 		}
 
@@ -392,7 +458,7 @@ public:
 	template<typename TT=limb_type>
 	constexpr void extract_pHT(TT *pHT) const noexcept {
 		constexpr size_t limbs_per_row = ((config.n - config.k)*q_bits + sizeof(TT)*8u - 1u) / (sizeof(TT)*8u);
-		ASSERT(limbs_per_row * sizeof(TT) <= HT.limbs_per_row() * sizeof(limb_type));
+		assert(limbs_per_row * sizeof(TT) <= HT.limbs_per_row() * sizeof(limb_type));
 
 		#pragma unroll
 		for (uint32_t i = 0; i < config.k+config.l; i++) {

@@ -5,7 +5,7 @@
 
 #include "matrix/matrix.h"
 #include "container/hashmap.h"
-#include "popcount/popcount.h"
+#include "algorithm/bits/popcount.h"
 #include "math/bc.h"
 #include "alloc/alloc.h"
 #include "hash/simple.h"
@@ -66,6 +66,7 @@ public:
 	using limb_type 	= typename ISD::limb_type;
 	using ISD::A,ISD::H,ISD::wA,ISD::wAT,ISD::HT,ISD::s,ISD::ws,ISD::e,ISD::syndrome,ISD::P,ISD::not_found,ISD::loops,ISD::ghz,ISD::expected_loops;
 	using ISD::cycles,ISD::periodic_print,ISD::packed,ISD::simd;
+	using ISD::lHT,ISD::pHT;
 
 
 	// base datatype of the hashmap
@@ -78,7 +79,7 @@ public:
 	size_t solutions[2*p] = {0};
 
 	/// internal arrays pointing to
-	l_type *pHT, *pHTr, *lHT;
+	l_type *pHTr;
 
 	/// Maximal list size of the final list
 	constexpr static size_t final_list_max_size = config.final_list_size;
@@ -119,28 +120,16 @@ public:
 
 	Stern() noexcept {
 		expected_loops = config.compute_loops();
-
-		// TODO move to ISD
-		constexpr size_t size_lHT = roundToAligned<1024>(sizeof(l_type) * (k+l));
-		lHT =(l_type *)cryptanalysislib::aligned_alloc(1024, size_lHT);
-		ASSERT(lHT);
-
-		constexpr size_t size_pHT = roundToAligned<1024>(sizeof(l_type) * (k+l) * NR_HT_T_LIMBS);
-		pHT =(l_type *)cryptanalysislib::aligned_alloc(1024, size_pHT);
-		ASSERT(pHT);
 		pHTr = pHT + baselist_enumeration_length *NR_HT_T_LIMBS;
 
 		hm = new HM{};
-		ASSERT(hm);
+		assert(hm);
 
 		bEnum = new EnumHashMap<configEnum, HM>{lHT, hm};
 		cEnum = new CollisionHashMap<configEnum, HM>{lHT, hm};
 	}
 
 	~Stern() noexcept {
-		free(lHT);
-		free(pHT);
-
 		delete hm;
 		delete bEnum;
 		delete cEnum;
@@ -162,8 +151,8 @@ public:
 
 			auto climb = ws.ptr(0);
 			for (uint16_t j = 0; j < p; j++) {
-				ASSERT(left[j] < kl_half + config.epsilon);
-				ASSERT(right[j] < (k+l));
+				assert(left[j] < kl_half + config.epsilon);
+				assert(right[j] < (k+l));
 
 				climb ^= (HT[left[j]][0] ^ HT[right[j]][0]);
 			}
@@ -188,8 +177,8 @@ public:
 			for (uint32_t i = 1; i < NR_HT_LIMBS; i++) {
 				climb = ws.ptr(i);
 				for (uint16_t j = 0; j < p; j++) {
-					ASSERT(left[j] < kl_half + config.epsilon);
-					ASSERT(right[j] < (k+l));
+					assert(left[j] < kl_half + config.epsilon);
+					assert(right[j] < (k+l));
 
 					climb ^= HT[left[j]][i] ^ HT[right[j]][i];
 				}
@@ -226,7 +215,7 @@ public:
 		// pad the list to a multiple of 8 by repeating the last entry. Otherwise
 		// the last `final_list_current_size % 8` entries are never checked.
 		const size_t padded_size = (final_list_current_size + 7u) & ~size_t(7u);
-		ASSERT(padded_size <= final_list_real_max_size);
+		assert(padded_size <= final_list_real_max_size);
 		for (size_t i = final_list_current_size; i < padded_size; i++) {
 			// NOTE: the last argument is the number of elements, not bytes
 			cryptanalysislib::memcpy(final_list_left[i],  final_list_left[final_list_current_size - 1u],  p);
@@ -242,7 +231,7 @@ public:
 		const uint32x8_t *final_list_right256 = (uint32x8_t *)final_list_right.data();
 
 		for (size_t cindex = 0; cindex < padded_size/8; cindex++) {
-			ASSERT(cindex < final_list_left.size());
+			assert(cindex < final_list_left.size());
 
 			const uint32x8_t left  = uint32x8_t::load((uint32_t *)(final_list_left256  + cindex));
 			const uint32x8_t right = uint32x8_t::load((uint32_t *)(final_list_right256 + cindex));
@@ -282,7 +271,7 @@ public:
 
 				// sanity check
 				if(i == 0) {
-					ASSERT(((climb.v32[0]) & ((1u << l) - 1u)) == 0);
+					assert(((climb.v32[0]) & ((1u << l) - 1u)) == 0);
 				}
 
 				// popcount
@@ -324,7 +313,7 @@ public:
 		// copy in the syndrome
 		tmp = ws;
 		for (uint32_t i = 0; i < 2*p; ++i) {
-			ASSERT(solutions[i] < k+l);
+			assert(solutions[i] < k+l);
 			Label::add(tmp.ptr(), tmp.ptr(), HT.row(solutions[i]));
 		}
 
@@ -334,7 +323,7 @@ public:
 		}
 
 		for (uint32_t i = 0; i < 2*p; ++i) {
-			ASSERT(n-k-l + solutions[i] < n);
+			assert(n-k-l + solutions[i] < n);
 			tmpe.set(1, 0, n-k-l + solutions[i]);
 		}
 
@@ -362,8 +351,8 @@ public:
 			                   const uint32_t nr_cols) __attribute__((always_inline)) -> bool {
 				(void)nr_cols;
 				if constexpr (!SternCollType) {
-					ASSERT(bEnum->check_hashmap2(syndrome, index1, 2 * p, l));
-					ASSERT((a1 ^ a2) == 0);
+					assert(bEnum->check_hashmap2(syndrome, index1, 2 * p, l));
+					assert((a1 ^ a2) == 0);
 				}
 				(void)a1;
 				(void)a2;

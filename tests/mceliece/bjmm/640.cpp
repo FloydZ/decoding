@@ -37,6 +37,6 @@ int main(int argc, char **argv) {
 	InitGoogleTest(&argc, argv);
 	ident();
 	srand(time(NULL));
-	random_seed(rand());
+	rng_seed(rand());
 	return RUN_ALL_TESTS();
 }

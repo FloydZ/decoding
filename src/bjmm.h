@@ -3,7 +3,7 @@
 
 #include "matrix/matrix.h"
 #include "container/hashmap.h"
-#include "popcount/popcount.h"
+#include "algorithm/bits/popcount.h"
 #include "math/bc.h"
 #include "alloc/alloc.h"
 #include "hash/simple.h"
@@ -77,8 +77,10 @@ public:
 	using Label 		= typename ISD::Label;
 	using ISD::A,ISD::H,ISD::wA,ISD::wAT,ISD::HT,ISD::s,ISD::ws,ISD::e,ISD::syndrome,ISD::P,ISD::not_found,ISD::loops,ISD::ghz;
 	using ISD::cycles,ISD::periodic_print,ISD::packed,ISD::simd;
+	using ISD::lHT,ISD::pHT;
 
 	using l_type   = typename ISD::l_type;
+	using limb_type = typename ISD::limb_type;
 	using keyType = LogTypeTemplate<l>;
 	// using valueType = TypeTemplate<bc(n, p)>[1];
 
@@ -93,7 +95,7 @@ public:
 	listType solutions[4*p] = {0};
 
 	/// internal arrays pointing to
-	l_type *pHT, *pHTr, *lHT, *lHTr;
+	l_type *pHTr, *lHTr;
 
 	/// Maximal list size of the final list
 	constexpr static size_t final_list_max_size = config.final_list_size;
@@ -101,9 +103,8 @@ public:
 	/// Current load of the final list
 	size_t final_list_current_size = 0;
 
-	/// TODO generalize
-	constexpr static uint32_t NR_HT_LIMBS 	= (n-k+63)/64;
-	constexpr static uint32_t NR_HT_T_LIMBS = (n-k+31)/32;
+	constexpr static uint32_t NR_HT_LIMBS 	= (n-k+sizeof(limb_type)*8 - 1u)/((sizeof(limb_type)*8));
+	constexpr static uint32_t NR_HT_T_LIMBS = (n-k+(sizeof(l_type)*8) - 1u)/(sizeof(l_type)*8);
 	constexpr static size_t baselist_enumeration_length = (k+l)/2u;
 
 	// hashmap stuff
@@ -135,27 +136,19 @@ public:
 	CollisionHashMapD2<configEnumD2, HM1, HM2> *cEnumD2;
 
 	/// NOTE: that we increase the size with about one bucket size to make sure that we can fully insert a bucket
-	// TODO think about the formular
+	// NOTE: `max + 1` suffices (`f2` flushes at `max`, a found solution skips the reset)
 	constexpr static size_t final_list_real_max_size = (final_list_max_size + HM2_bucketsize*HM2_bucketsize) + ((8u - ((final_list_max_size + HM2_bucketsize*HM2_bucketsize)%8u))%8u);
 	alignas(256) std::array<uint16_t[4*p], final_list_real_max_size> final_list;
 
 	BJMM() noexcept {
 		ISD::expected_loops = config.compute_loops();
-
-		constexpr size_t size_lHT = roundToAligned<1024>(sizeof(l_type) * (k+l));
-		lHT =(l_type *)cryptanalysislib::aligned_alloc(1024, size_lHT);
-		ASSERT(lHT);
 		lHTr = lHT + baselist_enumeration_length; // pointer in the middle
-
-		constexpr size_t size_pHT = roundToAligned<1024>(sizeof(l_type) * (k+l) * NR_HT_T_LIMBS);
-		pHT =(l_type *)cryptanalysislib::aligned_alloc(1024, size_pHT);
-		ASSERT(pHT);
 		pHTr = pHT + baselist_enumeration_length *NR_HT_T_LIMBS;
 
 		hm1 = new HM1{};
-		ASSERT(hm1);
+		assert(hm1);
 		hm2 = new HM2{};
-		ASSERT(hm2);
+		assert(hm2);
 
 		bEnum = new EnumHashMap<configEnum, HM1>{lHT, hm1};
 		cEnum = new CollisionHashMap<configEnum, HM1>{lHT, hm1};
@@ -163,9 +156,6 @@ public:
 	}
 
 	~BJMM() noexcept {
-		free(lHT);
-		free(pHT);
-
 		delete hm1;
 		delete hm2;
 		delete bEnum;
@@ -184,12 +174,12 @@ public:
 
 			auto climb = ws.ptr(0);
 			for (uint32_t j = 0; j < 4*p; j++) {
-				ASSERT(rows[j] < (k+l));
+				assert(rows[j] < (k+l));
 				climb ^= HT[rows[j]][0];
 			}
 
 			// match on zeros on a different window
-			ASSERT((climb & ((1u << l) - 1u)) == 0);
+			assert((climb & ((1u << l) - 1u)) == 0);
 			uint32_t wt = cryptanalysislib::popcount::popcount(climb);
 
 			// early exit
@@ -201,7 +191,7 @@ public:
 
 				#pragma unroll
 				for (uint32_t j = 0; j < 4*p; j++) {
-					ASSERT(rows[j] < k + l);
+					assert(rows[j] < k + l);
 					climb ^= HT[rows[j]][i];
 				}
 
@@ -232,7 +222,7 @@ public:
 		// copy in the syndrome
 		tmp = ws;
 		for (uint32_t i = 0; i < 4*p; ++i) {
-			ASSERT(solutions[i] < k+l);
+			assert(solutions[i] < k+l);
 			Label::add(tmp.ptr(), tmp.ptr(), HT.row(solutions[i]));
 		}
 
@@ -242,7 +232,7 @@ public:
 		}
 
 		for (uint32_t i = 0; i < 4*p; ++i) {
-			ASSERT(n-k-l + solutions[i] < n);
+			assert(n-k-l + solutions[i] < n);
 			tmpe.set(1, 0, n-k-l + solutions[i]);
 		}
 
@@ -263,17 +253,16 @@ public:
 			ISD::extract_pHT(pHT);
 
 
-			/// TODO describe the parameters
-			/// \param a1
-			/// \param a2
-			/// \param index1
-			/// \param index2
-			/// \param nr_cols
+			/// \param a1 right label xor target
+			/// \param a2 left label (hashmap)
+			/// \param index1 rows: left `p`, then right `p`
+			/// \param index2 rows of the right element (`index1 + p`)
+			/// \param nr_cols number of collisions (1 if not simd)
 			auto f1 = [&, this](const l_type a1, const l_type a2,
 			                    const uint16_t *index1, const uint16_t *index2,
 			                    const uint32_t nr_cols) __attribute__((always_inline)) {
 				// NOTE: iT1 curently unknown in the global scope
-			  	// ASSERT(bEnum->check_hashmap2(iT1, index1, 2*p, l1));
+			  	// assert(bEnum->check_hashmap2(iT1, index1, 2*p, l1));
 				(void) index2;
 				(void) nr_cols;
 				const l_type a = a1 ^ a2;
@@ -283,7 +272,7 @@ public:
 			auto f2 = [&, this](const l_type a1, const l_type a2,
 								const uint16_t *index1, const uint16_t *index2,
 								const uint32_t nr_cols) __attribute__((always_inline)) {
-			  	ASSERT(bEnum->check_hashmap2(syndrome, index1, 4*p, l));
+			  	assert(bEnum->check_hashmap2(syndrome, index1, 4*p, l));
 				(void) index2;
 				(void) nr_cols;
 				(void) a1;

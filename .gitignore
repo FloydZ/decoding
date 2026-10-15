@@ -9,6 +9,8 @@ deps/decoding/
 deps/elena_smallSecretLWE/
 .clangd/
 build/
+build-gcc/
+build-clang/
 compile_commands.json
 .vimspector.json
 main.h

@@ -17,20 +17,24 @@ stdenv.mkDerivation {
 
   buildInputs = [
     pyenv
-  	gtest
-	gbenchmark 
-	git 
-	cmake
-	clang
+    gtest
+    gbenchmark 
+    git 
+    cmake
+    clang
     clang-tools
     llvmPackages.openmp
     llvm
-	gcc
+    gcc
   ]++ (lib.optionals pkgs.stdenv.isLinux ([
-   	flamegraph
-   	gdb
+    flamegraph
+    gdb
     perf
-   	pprof
-   	valgrind
-  ]));
+    pprof
+    valgrind
+    ]));
+  shellHook = ''
+    export NIX_ENFORCE_NO_NATIVE=0
+    export NIX_HARDENING_ENABLE=0
+  '';
 }

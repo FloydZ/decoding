@@ -6,8 +6,8 @@
 #include "matrix/matrix.h"
 #include "list/list.h"
 #include "list/enumeration/fq.h"
-#include "sort.h"
-#include "popcount/popcount.h"
+#include "sort/sort.h"
+#include "algorithm/bits/popcount.h"
 #include "mitm.h"
 #include "isd.h"
 
@@ -33,17 +33,20 @@ private:
 	constexpr static uint32_t k = isd.k;
 	constexpr static uint32_t w = isd.w;
 	constexpr static uint32_t q = isd.q;
-	constexpr static uint32_t qbits = bits_log2(q);
+	constexpr static uint32_t qbits = ceil_log2(q);
 
-	constexpr static uint32_t l = isd.l;
+	constexpr static uint32_t sieving_steps = config.sieving_steps;
+	static_assert(isd.l % sieving_steps == 0);
+
+	/// window of a single sieving step, `isd.l` is the full window
+	constexpr static uint32_t l = isd.l / sieving_steps;
 	constexpr static uint32_t p = isd.p;
 
 	constexpr static uint32_t threads = isd.threads;
 
-	constexpr static uint32_t sieving_steps = config.sieving_steps;
 	constexpr static uint32_t enumeration_q = config.enumeration_q;
 
-	constexpr static uint32_t full_l = l*sieving_steps;
+	constexpr static uint32_t full_l = isd.l;
 
 public:
 	using ISD = ISDInstance<uint64_t, isd>;
@@ -63,13 +66,13 @@ public:
 	constexpr static uint32_t HM_nrb = ISD::HashMasp_BucketSize(l);
 	constexpr static uint32_t HM_bs = config.HM_bs;
 	using Value = typename std::conditional<packed,
-			kAryPackedContainer_T<limb_type , k+full_l, q>,
-			kAryContainer_T<limb_type , k+full_l, q>
+			FqPackedVector<k+full_l, q, limb_type>,
+			FqNonPackedVector<k+full_l, q, limb_type>
 	>::type;
 
 	using Label = typename std::conditional<packed,
-			kAryPackedContainer_T<limb_type , n-k, q>,
-			kAryContainer_T<limb_type , n-k, q>
+			FqPackedVector<n-k, q, limb_type>,
+			FqNonPackedVector<n-k, q, limb_type>
 	>::type;
 	using Element       = Element_T<Value, Label, PCSubMatrix_T>;
 
@@ -79,8 +82,10 @@ public:
 
 	/// needed list stuff
 	constexpr static size_t list_size = compute_combinations_fq_chase_list_size<k, q, p>();
-	using List = Parallel_List_FullElement_T<Element>;
-	using Generator = ListEnumerateMultiFullLength<List, k, q, p>;
+	using List = List_T<Element>;
+	using Generator = typename std::conditional<q == 2,
+	        BinaryListEnumerateMultiFullLength<List, k, p>,
+	        ListEnumerateMultiFullLength<List, k, q, p>>::type;
 	Generator G;
 	List *L1, *L2;
 
@@ -113,7 +118,7 @@ public:
 	constexpr inline static __uint128_t Compress(const Label &label) noexcept {
 		/// some security measurements:
 		if constexpr (qbits*l > 128) {
-			ASSERT(false && "not implemented");
+			assert(false && "not implemented");
 		}
 
 		/// easy case
@@ -144,6 +149,9 @@ public:
 	/// list for elements, which are equal zero summed together
 	/// \return the negative of label[lower, q*l*nr_window) shifted to zero
 	constexpr inline static __uint128_t NegateCompress(const Label &label) noexcept {
+		if constexpr (q == 2) {
+			return Compress(label);
+		}
 		Label tmp = label;
 		tmp.neg();
 		return Compress(tmp);
@@ -168,6 +176,9 @@ public:
 
 	template<const uint32_t window>
 	constexpr inline static l_type NegateCompressWindow(const Label &label) noexcept {
+		if constexpr (q == 2) {
+			return CompressWindow<window>(label);
+		}
 		Label tmp = label;
 		tmp.neg();
 		return CompressWindow<window>(tmp);
@@ -178,12 +189,12 @@ public:
 		/// init lists
 		L1 = new List(list_size, threads);
 		L2 = new List(list_size, threads);
-		ASSERT(L1 != nullptr && L2 != nullptr);
+		assert(L1 != nullptr && L2 != nullptr);
 
 		/// init hashmap
 		hm1 = new HM();
 		hm2 = new HM();
-		ASSERT(hm1 != nullptr && hm2 != nullptr);
+		assert(hm1 != nullptr && hm2 != nullptr);
 	}
 
 	~FqSieving() noexcept {
@@ -264,7 +275,7 @@ public:
 
 				/// NOTE: Debug check
 				for (uint32_t j = 0; j < full_l; ++j) {
-					ASSERT(tmp.label.get(j) == 0u);
+					assert(tmp.label.get(j) == 0u);
 				}
 
 
@@ -297,7 +308,7 @@ public:
 		hm2->clear();
 
 		Element tmp;
-		IndexType npos[1];
+		valueType npos;
 		const size_t s_pos = L1->start_pos(tid);
 		const size_t e_pos = std::min(L1->end_pos(tid), current_list_size);
 
@@ -344,9 +355,9 @@ public:
 
 				/// some assertions
 				for (uint32_t m = 0; m < upper_l; ++m) {
-					ASSERT(tmp.label[m] == 0);
+					assert(tmp.label[m] == 0);
 				}
-				ASSERT(tmp.value.popcnt() == 2*p);
+				assert(tmp.value.popcnt() == 2*p);
 
 
 				/// insert this into the other list and hashmap, keyed by the
@@ -385,8 +396,8 @@ public:
 		//label_solution_to_recover.print();
 		//value_solution_to_recover.print();
 
-		ASSERT(label_solution_to_recover.popcnt() <= (w-2*p));
-		ASSERT(value_solution_to_recover.popcnt() == 2*p);
+		assert(label_solution_to_recover.popcnt() <= (w-2*p));
+		assert(value_solution_to_recover.popcnt() == 2*p);
 
 		for (uint32_t i = 0; i < n-k-full_l; ++i) {
 			tmpe.set(label_solution_to_recover.get(full_l + i), 0, (n-k-full_l) - i - 1);
@@ -396,7 +407,7 @@ public:
 			tmpe.set(value_solution_to_recover.get(i), 0, (n-k-full_l)+i);
 		}
 
-		ASSERT(tmpe.get(0).popcnt() <= w);
+		assert(tmpe.row_popcnt(0) <= w);
 
 		// apply back permutation
 		for (uint32_t i = 0; i < n; ++i) {

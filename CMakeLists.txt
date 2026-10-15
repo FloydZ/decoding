@@ -2,7 +2,8 @@ cmake_minimum_required(VERSION 3.20)
 project(decoding)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_VERBOSE_MAKEFILE ON)
-set(CMAKE_CXX_STANDARD 20)
+# NOTE: cryptanalysislib needs C++23 (e.g. `static` variables in `constexpr` functions)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # options
@@ -35,30 +36,29 @@ endif()
 include(FetchContent)
 include(ExternalProject)
 include(CheckCXXCompilerFlag) 	# check for compiler optimization flags
+include(CheckCXXSourceCompiles) # check for libraries
 include(CheckIPOSupported)  	# check for -flto
 include(CheckLanguage) 			# needed for `check_language(CUDA)`
 
-# load the external main project. This encloses all helper functions.
-ExternalProject_Add(cryptanalysislib_project
-        SOURCE_DIR        ${CMAKE_SOURCE_DIR}/deps/cryptanalysislib
-        CONFIGURE_COMMAND cd <SOURCE_DIR> && mkdir -p build
-        COMMAND           cd <SOURCE_DIR> && cd build/ && cmake ..
-        BUILD_COMMAND     cd <SOURCE_DIR> && cd build/ && make -j8
-        INSTALL_COMMAND   ""
-        TEST_COMMAND      ""
-)
-
+# NOTE: cryptanalysislib is header only, hence it is not build (neither its
+# tests nor its benchmarks). Only its `src` directory is included below.
 
 include("deps/cryptanalysislib/deps/cmake_optimize_for_architecture/HostOptimizations.cmake")
 
 check_cxx_compiler_flag(-march=native COMPILER_SUPPORTS_MARCH_NATIVE)
 check_cxx_compiler_flag(-fno-inline COMPILER_SUPPORTS_NO_INLINE)
-check_cxx_compiler_flag(-fsanitize=address COMPILER_SUPPORTS_SANITIZE_ADDRESS) # TODO support not recognized
+# NOTE: the sanitizer runtime is needed at link time
+set(CMAKE_REQUIRED_LINK_OPTIONS -fsanitize=address)
+check_cxx_compiler_flag(-fsanitize=address COMPILER_SUPPORTS_SANITIZE_ADDRESS)
+unset(CMAKE_REQUIRED_LINK_OPTIONS)
 check_cxx_compiler_flag(-fsanitize=memory COMPILER_SUPPORTS_SANITIZE_MEMORY)
 check_cxx_compiler_flag(-fconstexpr-steps=9999999 COMPILER_SUPPORTS_CONSTEXPR_COST)
 check_cxx_compiler_flag(-fno-exceptions COMPILER_SUPPORTS_NO_EXCEPTION)
 check_ipo_supported(RESULT lto_supported OUTPUT error)
-check_cxx_compiler_flag(-latomic LINKER_SUPPORTS_ATOMIC) # TODO
+# NOTE: `-l` is a linker flag, hence a library check
+set(CMAKE_REQUIRED_LIBRARIES atomic)
+check_cxx_source_compiles("int main() { return 0; }" LINKER_SUPPORTS_ATOMIC)
+unset(CMAKE_REQUIRED_LIBRARIES)
 
 # find needed packages: the good thing only is: we only have a single external
 # dependencies. 
@@ -70,13 +70,12 @@ find_package(benchmark)
 find_package(Git QUIET)
 
 # init the submodules
-# NOTE: only download tracy if it is actually used. TODO: pin a release tag
-# instead of `master` to get reproducible builds.
+# NOTE: only download tracy if it is actually used.
 if(USE_TRACY)
 	FetchContent_Declare(
 		tracy
 		GIT_REPOSITORY 	https://github.com/wolfpld/tracy
-		GIT_TAG 		master
+		GIT_TAG 		v0.14.2
 		GIT_SHALLOW 	TRUE
 		GIT_PROGRESS 	TRUE
 	)
@@ -98,9 +97,7 @@ if(USE_TCMALLOC)
 	set(TCMALLOC_LIBRARIES "tcmalloc")
 endif()
 
-# NOTE: `COMPILER_SUPPORTS_SANITIZE_ADDRESS` is not reliable (the check does not
-# pass the flag to the linker), hence only the option is checked.
-if(USE_SANITIZER)
+if(USE_SANITIZER AND COMPILER_SUPPORTS_SANITIZE_ADDRESS)
 	message(STATUS "Using address sanitize")
 	# possible sanitizers = -fsanitize=[address,leak,thread,memory,undefined]
 	set(SANITIZER_FLAGS "-fsanitize=address -fsanitize=pointer-compare -fno-omit-frame-pointer")
@@ -141,6 +138,10 @@ set(LINK_TEST_FLAGS
 	Threads::Threads 
 	OpenMP::OpenMP_CXX
 )
+
+if(LINKER_SUPPORTS_ATOMIC)
+	list(APPEND LINK_TEST_FLAGS atomic)
+endif()
 
 if(USE_TRACY)
 	message(STATUS "Using tracy")

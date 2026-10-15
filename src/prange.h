@@ -5,7 +5,7 @@
 
 #include "matrix/matrix.h"
 #include "container/hashmap.h"
-#include "popcount/popcount.h"
+#include "algorithm/bits/popcount.h"
 #include "math/bc.h"
 #include "alloc/alloc.h"
 #include "hash/simple.h"
@@ -33,27 +33,12 @@ public:
 	using limb_type 	= ISD::limb_type;
 	using ISD::A,ISD::H,ISD::wA,ISD::wAT,ISD::HT,ISD::s,ISD::ws,ISD::e,ISD::syndrome,ISD::P,ISD::not_found,ISD::loops,ISD::ghz;
 	using ISD::cycles, ISD::gaus_cycles, ISD::periodic_print;
+	using ISD::pHT;
 
 	constexpr static bool packed = true;
 
 	// base datatype of the hashmap
 	using l_type   = MinLogTypeTemplate<l, 32>;
-
-	constexpr static uint32_t NR_HT_T_LIMBS = (n-k+(sizeof(l_type)*8) - 1u)/(sizeof(l_type)*8);
-
-	/// internal arrays pointing to
-	l_type *pHT;
-
-
-	Prange() noexcept {
-		constexpr size_t size_pHT = roundToAligned<1024>(sizeof(l_type) * (k+l) * NR_HT_T_LIMBS);
-		pHT =(l_type *)cryptanalysislib::aligned_alloc(1024, size_pHT);
-		ASSERT(pHT);
-	}
-
-	~Prange() noexcept {
-		free(pHT);
-	}
 
 	/// reconstruct the final solution
 	void __attribute__ ((noinline))

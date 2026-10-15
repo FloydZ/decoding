@@ -5,8 +5,8 @@
 #include "container/fq_vector.h"
 #include "matrix/matrix.h"
 #include "list/list.h"
-#include "sort.h"
-#include "popcount/popcount.h"
+#include "sort/sort.h"
+#include "algorithm/bits/popcount.h"
 #include "mitm.h"
 #include "isd.h"
 #include "../stern.h"
@@ -21,7 +21,7 @@ private:
 	constexpr static uint32_t k = isd.k;
 	constexpr static uint32_t w = isd.w;
 	constexpr static uint32_t q = isd.q;
-	constexpr static uint32_t qbits = bits_log2(q);
+	constexpr static uint32_t qbits = ceil_log2(q);
 
 	constexpr static uint32_t l = isd.l;
 	constexpr static uint32_t p = isd.p;
@@ -61,7 +61,7 @@ public:
 	constexpr inline static __uint128_t Compress(const Label &label) noexcept {
 		/// some security measurements:
 		if constexpr (qbits*l > 128) {
-			ASSERT(false && "not implemented");
+			assert(false && "not implemented");
 		}
 
 		/// easy case
@@ -115,11 +115,11 @@ public:
 		/// init lists
 		L1 = new List(list_size, threads);
 		L2 = new List(list_size, threads);
-		ASSERT((L1 != nullptr) && (L2 != nullptr));
+		assert((L1 != nullptr) && (L2 != nullptr));
 
 		///// init hashmap
 		hm = new HM;
-		ASSERT(hm != nullptr);
+		assert(hm != nullptr);
 	}
 
 	/// free all the memory
@@ -166,7 +166,7 @@ public:
 
 				/// some debug checks
 				for (uint32_t s = 0; s < l; ++s) {
-					ASSERT(tmp.get(s) == 0);
+					assert(tmp.get(s) == 0);
 				}
 
 				/// if this checks passes we found a solution
@@ -191,10 +191,10 @@ public:
 		e.zero();
 
 		for (uint32_t i = 0; i < l; ++i) {
-			ASSERT(label_solution_to_recover.get(i) == 0);
+			assert(label_solution_to_recover.get(i) == 0);
 		}
-		ASSERT(label_solution_to_recover.popcnt() <= (w-2*p));
-		ASSERT(value_solution_to_recover.popcnt() == 2*p);
+		assert(label_solution_to_recover.popcnt() <= (w-2*p));
+		assert(value_solution_to_recover.popcnt() == 2*p);
 
 		for (uint32_t i = 0; i < n-k-l; ++i) {
 			tmpe.set(label_solution_to_recover.get(l + i), 0, (n-k-l) - i - 1);
@@ -204,7 +204,7 @@ public:
 			tmpe.set(value_solution_to_recover.get(i), 0, (n-k-l)+i);
 		}
 
-		ASSERT(tmpe.get(0).popcnt() <= w);
+		assert(tmpe.get(0).popcnt() <= w);
 
 		// apply back permutation
 		for (uint32_t i = 0; i < n; ++i) {
@@ -226,7 +226,7 @@ public:
 			{
 				const uint32_t tid = 0; //Thread::get_tid();
 				init_list(tid);
-				Thread::sync();
+				OMP_BARRIER
 				find_collisions(tid);
 			}
 		}
