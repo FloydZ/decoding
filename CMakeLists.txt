@@ -14,7 +14,7 @@ option(USE_LTO "Enable -flto" OFF)
 option(USE_PROFILE "Enable profile guided optmization" OFF)
 option(USE_POLLY "Enable polly loop optimization" OFF)
 option(USE_BOLT "Enable bolt binary optmization" OFF)
-option(USE_TRACY "Enable tracy profiling" ON)
+option(USE_TRACY "Enable tracy profiling" OFF)
 
 set(default_build_type "Release")
 
@@ -43,7 +43,7 @@ include(CheckLanguage) 			# needed for `check_language(CUDA)`
 # NOTE: cryptanalysislib is header only, hence it is not build (neither its
 # tests nor its benchmarks). Only its `src` directory is included below.
 
-include("deps/cryptanalysislib/deps/cmake_optimize_for_architecture/HostOptimizations.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/deps/cryptanalysislib/deps/cmake_optimize_for_architecture/HostOptimizations.cmake")
 
 check_cxx_compiler_flag(-march=native COMPILER_SUPPORTS_MARCH_NATIVE)
 check_cxx_compiler_flag(-fno-inline COMPILER_SUPPORTS_NO_INLINE)
@@ -63,7 +63,8 @@ unset(CMAKE_REQUIRED_LIBRARIES)
 # find needed packages: the good thing only is: we only have a single external
 # dependencies. 
 enable_testing()
-find_package(OpenMP REQUIRED)
+# NOTE: only C++ is compiled, the C compiler may lack OpenMP (AppleClang)
+find_package(OpenMP REQUIRED COMPONENTS CXX)
 find_package(Threads REQUIRED)
 find_package(GTest) 
 find_package(benchmark)
@@ -75,7 +76,7 @@ if(USE_TRACY)
 	FetchContent_Declare(
 		tracy
 		GIT_REPOSITORY 	https://github.com/wolfpld/tracy
-		GIT_TAG 		v0.14.2
+		GIT_TAG 		v0.14.1
 		GIT_SHALLOW 	TRUE
 		GIT_PROGRESS 	TRUE
 	)
