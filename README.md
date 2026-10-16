@@ -285,7 +285,22 @@ TODO image
 --------------------
 
 ```bash 
-TODO image
+                     (k+l)/2         (k+l)/2
+                 ┌───────────────┬───────────────┐
+  e2:            │   weight p    │   weight p    │
+                 └───────┬───────┴───────┬───────┘
+                         │               │
+                     ┌───┴───┐       ┌───┴───┐
+                     │  L1   │       │ L2 + s│
+                     └───┬───┘       └───┬───┘
+                         │  match on l   │
+                     ┌───┴───┐           │
+                     │  HM   │◄──────────┘
+                     └───┬───┘
+                         │
+                  ┌──────┴──────┐
+                  │ final list  │  wt <= w-2p ?
+                  └─────────────┘
 ```
 
 - Technically only `Dumers` algorithm is implemented.
@@ -308,7 +323,7 @@ TODO image
 `Stern` `May-Ozerov` using `Esser-Kübler-Z.`- NN:
 -------------------------------------------------
 
-Apply the nearest neighbour algorithm by [Esser-Kübler-Z.](TODO) to find 
+Apply the nearest neighbour algorithm by [Esser-Kübler-Z.](https://arxiv.org/abs/2102.02597) to find 
 close elements in the last level.
 
 ```bash 

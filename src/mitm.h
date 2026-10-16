@@ -772,8 +772,7 @@ class CollisionHashMapD {
 	constexpr static size_t enumeration_size_per_thread = enumeration_size/threads;
 
 
-	// TODO
-	using l_type = uint32_t;
+	using l_type = typename std::tuple_element_t<0, std::tuple<HMs...>>::data_type::data_type;
 
 	const l_type *lHT, *lHTr;
 	std::tuple<HMs&...> hms;
