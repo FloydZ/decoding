@@ -213,21 +213,9 @@ TEST(CollisionHashMap, enumeration) {
 				 HM_DataType_IndexType *index2,
 	             const uint32_t nr_cols) {
 		(void) nr_cols;
-	    bool found = false;
-		const T a = lp1 ^ lp2;
-		for (size_t i = 0; i < k + l; ++i) {
-			  if (a == data[i]) {
-				  found = true;
-				  break;
-			  }
-		}
-
-		if (!found) {
-			  std::cout << a << " " << index1[0] << "," << index2[0] << std::endl;
-		}
-
-
-	  EXPECT_EQ(found, true);
+		// a collision sums to zero
+		EXPECT_EQ(lp1 ^ lp2, 0u);
+		EXPECT_EQ(data[index1[0]] ^ data[index1[1]] ^ data[index2[0]] ^ data[index2[1]], 0u);
 	};
 
 	mitm.step(0, f, 0, false);
@@ -423,6 +411,7 @@ TEST(CollisionHashMapD3, enumeration) {
 	cryptanalysislib::aligned_free(data);
 	delete hm1;
 	delete hm2;
+	delete hm3;
 }
 
 int main(int argc, char **argv) {
