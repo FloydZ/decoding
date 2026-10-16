@@ -17,22 +17,24 @@ stdenv.mkDerivation {
 
   buildInputs = [
     pyenv
-  	gtest
-	gbenchmark 
-	git 
-	cmake
-	clang_17
-    clang-tools_17
-    llvmPackages_17.openmp
-    llvm_17
-	gcc
+    gtest
+    gbenchmark 
+    git 
+    cmake
+    clang
+    clang-tools
+    llvmPackages.openmp
+    llvm
+    gcc
   ]++ (lib.optionals pkgs.stdenv.isLinux ([
-   	flamegraph
-   	gdb
-    linuxKernel.packages.linux_6_6.perf
-   	pprof
-   	valgrind
-   	massif-visualizer
-    #TODO cudatoolkit
-  ]));
+    flamegraph
+    gdb
+    perf
+    pprof
+    valgrind
+    ]));
+  shellHook = ''
+    export NIX_ENFORCE_NO_NATIVE=0
+    export NIX_HARDENING_ENABLE=0
+  '';
 }

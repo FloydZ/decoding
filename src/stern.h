@@ -5,7 +5,7 @@
 
 #include "matrix/matrix.h"
 #include "container/hashmap.h"
-#include "popcount/popcount.h"
+#include "algorithm/bits/popcount.h"
 #include "math/bc.h"
 #include "alloc/alloc.h"
 #include "hash/simple.h"
@@ -66,6 +66,7 @@ public:
 	using limb_type 	= typename ISD::limb_type;
 	using ISD::A,ISD::H,ISD::wA,ISD::wAT,ISD::HT,ISD::s,ISD::ws,ISD::e,ISD::syndrome,ISD::P,ISD::not_found,ISD::loops,ISD::ghz,ISD::expected_loops;
 	using ISD::cycles,ISD::periodic_print,ISD::packed,ISD::simd;
+	using ISD::lHT,ISD::pHT;
 
 
 	// base datatype of the hashmap
@@ -78,7 +79,7 @@ public:
 	size_t solutions[2*p] = {0};
 
 	/// internal arrays pointing to
-	l_type *pHT, *pHTr, *lHT;
+	l_type *pHTr;
 
 	/// Maximal list size of the final list
 	constexpr static size_t final_list_max_size = config.final_list_size;
@@ -119,28 +120,16 @@ public:
 
 	Stern() noexcept {
 		expected_loops = config.compute_loops();
-
-		// TODO move to ISD
-		constexpr size_t size_lHT = roundToAligned<1024>(sizeof(l_type) * (k+l));
-		lHT =(l_type *)cryptanalysislib::aligned_alloc(1024, size_lHT);
-		ASSERT(lHT);
-
-		constexpr size_t size_pHT = roundToAligned<1024>(sizeof(l_type) * (k+l) * NR_HT_T_LIMBS);
-		pHT =(l_type *)cryptanalysislib::aligned_alloc(1024, size_pHT);
-		ASSERT(pHT);
 		pHTr = pHT + baselist_enumeration_length *NR_HT_T_LIMBS;
 
 		hm = new HM{};
-		ASSERT(hm);
+		assert(hm);
 
 		bEnum = new EnumHashMap<configEnum, HM>{lHT, hm};
 		cEnum = new CollisionHashMap<configEnum, HM>{lHT, hm};
 	}
 
 	~Stern() noexcept {
-		free(lHT);
-		free(pHT);
-
 		delete hm;
 		delete bEnum;
 		delete cEnum;
@@ -162,15 +151,21 @@ public:
 
 			auto climb = ws.ptr(0);
 			for (uint16_t j = 0; j < p; j++) {
-				ASSERT(left[j] < kl_half);
-				ASSERT(right[j] < (k+l));
+				assert(left[j] < kl_half + config.epsilon);
+				assert(right[j] < (k+l));
 
 				climb ^= (HT[left[j]][0] ^ HT[right[j]][0]);
 			}
 
-			// this is only correct if not STERNIM. In the IM case we
-			// match on zeros on a different window
-			// ASSERT((climb & ((1u << l) - 1u)) == 0);
+			// The first `l` coordinates are not covered by the identity part of
+			// the parity check matrix, hence they must be zero. Stern guarantees
+			// this via the collision, Stern-IM (which matches on a different
+			// window) does not. Without this check Stern-IM reports wrong solutions.
+			static_assert(l < sizeof(climb)*8u);
+			constexpr decltype(climb) l_mask = (decltype(climb)(1u) << l) - 1u;
+			if ((climb & l_mask) != 0) {
+				continue;
+			}
 			uint32_t wt = cryptanalysislib::popcount::popcount(climb);
 
 			// early exit
@@ -182,8 +177,8 @@ public:
 			for (uint32_t i = 1; i < NR_HT_LIMBS; i++) {
 				climb = ws.ptr(i);
 				for (uint16_t j = 0; j < p; j++) {
-					ASSERT(left[j] < kl_half);
-					ASSERT(right[j] < (k+l));
+					assert(left[j] < kl_half + config.epsilon);
+					assert(right[j] < (k+l));
 
 					climb ^= HT[left[j]][i] ^ HT[right[j]][i];
 				}
@@ -195,8 +190,8 @@ public:
 				not_found = false;
 				cycles = cpucycles() - cycles;
 				for (uint16_t j = 0; j < p; ++j) {
-					solutions[j*p + 0] = left[j];
-					solutions[j*p + 1] = right[j];
+					solutions[j]     = left[j];
+					solutions[p + j] = right[j];
 				}
 
 				return true;
@@ -210,21 +205,43 @@ public:
 	/// checks for collisions in the final list.
 	/// NOTE: using AVX2, therefore 8 elements are checked simultaneously
 	bool compute_finale_list_simd() noexcept {
+		// 8 list entries are loaded as 8 x uint32_t, which only works for p == 2
+		static_assert(p == 2);
+		static_assert(sizeof(final_list_left[0]) == sizeof(uint32_t));
+		if (final_list_current_size == 0) {
+			return false;
+		}
+
+		// pad the list to a multiple of 8 by repeating the last entry. Otherwise
+		// the last `final_list_current_size % 8` entries are never checked.
+		const size_t padded_size = (final_list_current_size + 7u) & ~size_t(7u);
+		assert(padded_size <= final_list_real_max_size);
+		for (size_t i = final_list_current_size; i < padded_size; i++) {
+			// NOTE: the last argument is the number of elements, not bytes
+			cryptanalysislib::memcpy(final_list_left[i],  final_list_left[final_list_current_size - 1u],  p);
+			cryptanalysislib::memcpy(final_list_right[i], final_list_right[final_list_current_size - 1u], p);
+		}
+
 		uint32x8_t rows1[p], rows2[p];
 		const uint32x8_t filter_mask = uint32x8_t::set1(w - 2*p + 1);
 		const uint32x8_t mul_mask    = uint32x8_t::set1(NR_HT_T_LIMBS);
+		const uint32x8_t low16_mask  = uint32x8_t::set1(0xFFFFu);
 
 		const uint32x8_t *final_list_left256  = (uint32x8_t *)final_list_left.data();
 		const uint32x8_t *final_list_right256 = (uint32x8_t *)final_list_right.data();
 
-		for (size_t cindex = 0; cindex < final_list_current_size/8; cindex++) {
-			ASSERT(cindex < final_list_left.size());
+		for (size_t cindex = 0; cindex < padded_size/8; cindex++) {
+			assert(cindex < final_list_left.size());
 
 			const uint32x8_t left  = uint32x8_t::load((uint32_t *)(final_list_left256  + cindex));
 			const uint32x8_t right = uint32x8_t::load((uint32_t *)(final_list_right256 + cindex));
 
-			biject_simd<baselist_enumeration_length, p>(left, rows1);
-			biject_simd<baselist_enumeration_length, p>(right, rows2);
+			// NOTE: every entry holds the two 16-bit row indices (the right ones
+			// are global) written by `f`. They are not chase/combination indices.
+			rows1[0] = left & low16_mask;
+			rows1[1] = left >> 16u;
+			rows2[0] = right & low16_mask;
+			rows2[1] = right >> 16u;
 
 			// ignore special case for lowest limb
 			uint32x8_t wt{};
@@ -244,18 +261,17 @@ public:
 				uint32x8_t climb = uint32x8_t::set1(ws.ptr(i));
 
 				const l_type *base_pHT = pHT + i;
-				const l_type *base_pHTr = pHTr + i;
 
 				// #pragma unroll
 				for (uint16_t j = 0; j < p; j++) {
 					const uint32x8_t t11 = uint32x8_t::template gather <sizeof(l_type)>(base_pHT, rows1[j]);
-					const uint32x8_t t21 = uint32x8_t::template gather <sizeof(l_type)>(base_pHTr, rows2[j]);
+					const uint32x8_t t21 = uint32x8_t::template gather <sizeof(l_type)>(base_pHT, rows2[j]);
 					climb = climb ^ t11 ^ t21;
 				}
 
 				// sanity check
 				if(i == 0) {
-					ASSERT(((climb.v32[0]) & ((1u << l) - 1u)) == 0);
+					assert(((climb.v32[0]) & ((1u << l) - 1u)) == 0);
 				}
 
 				// popcount
@@ -276,8 +292,8 @@ public:
 
 				const uint32_t pos = __builtin_ctz(wt_);
 				for (uint16_t j = 0; j < p; ++j) {
-					solutions[j*p + 0] = rows1[j].v32[pos]/NR_HT_T_LIMBS;
-					solutions[j*p + 1] = rows1[j].v32[pos]/NR_HT_T_LIMBS + baselist_enumeration_length;
+					solutions[j]     = rows1[j].v32[pos]/NR_HT_T_LIMBS;
+					solutions[p + j] = rows2[j].v32[pos]/NR_HT_T_LIMBS;
 				}
 
 				return true;
@@ -297,7 +313,7 @@ public:
 		// copy in the syndrome
 		tmp = ws;
 		for (uint32_t i = 0; i < 2*p; ++i) {
-			ASSERT(solutions[i] < k+l);
+			assert(solutions[i] < k+l);
 			Label::add(tmp.ptr(), tmp.ptr(), HT.row(solutions[i]));
 		}
 
@@ -307,7 +323,7 @@ public:
 		}
 
 		for (uint32_t i = 0; i < 2*p; ++i) {
-			ASSERT(n-k-l + solutions[i] < n);
+			assert(n-k-l + solutions[i] < n);
 			tmpe.set(1, 0, n-k-l + solutions[i]);
 		}
 
@@ -335,10 +351,11 @@ public:
 			                   const uint32_t nr_cols) __attribute__((always_inline)) -> bool {
 				(void)nr_cols;
 				if constexpr (!SternCollType) {
-					ASSERT(bEnum->check_hashmap2(syndrome, index1, 2 * p, l));
-					const l_type a = a1 ^ a2;
-					ASSERT(a == 0);
+					assert(bEnum->check_hashmap2(syndrome, index1, 2 * p, l));
+					assert((a1 ^ a2) == 0);
 				}
+				(void)a1;
+				(void)a2;
 
 				for (uint32_t i = 0; i < p; i++) {
 					final_list_left[final_list_current_size][i]  = index1[i];

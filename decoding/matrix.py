@@ -54,7 +54,8 @@ class Matrix:
                     D.data[i][j] = t 
 
         if transposed:
-            self = D.transpose()
+            # NOTE: assigning to `self` only rebinds the local name
+            self.data = D.transpose().data
         return self
         
     def random(self) -> 'Matrix':
@@ -81,6 +82,7 @@ class Matrix:
 
     def gauß(self, max_rank: Union[int, None] = None) -> int:
         """ simple Gaussian elimination. Is an inplace operation
+        NOTE: `q` must be prime.
         :return the rank of the matrix
         """
         if max_rank is None:
@@ -91,10 +93,10 @@ class Matrix:
         for col in range(self.ncols):
             if row >= min(max_rank, self.nrows): break
 
-            # find pivot
+            # find pivot (any non-zero element, not only 1)
             sel = -1
             for i in range(row, self.nrows):
-                if self.data[i][col] == 1:
+                if self.data[i][col] != 0:
                     sel = i 
                     break
 
@@ -103,14 +105,19 @@ class Matrix:
 
             self.swap_rows(sel, row)
 
-            # solve remaining coordinates
+            # normalize the pivot to 1
+            inv = pow(self.data[row][col], -1, self.q)
+            for j in range(self.ncols):
+                self.data[row][j] = (self.data[row][j] * inv) % self.q
+
+            # solve remaining coordinates: subtract the correct multiple
             for i in range(self.nrows):
                 if i == row: continue 
-                if self.data[i][col] == 0: continue
+                factor = self.data[i][col]
+                if factor == 0: continue
 
                 for j in range(self.ncols):
-                    self.data[i][j] += self.data[row][j]
-                    self.data[i][j] %= self.q
+                    self.data[i][j] = (self.data[i][j] - factor * self.data[row][j]) % self.q
 
             row += 1
         
@@ -162,14 +169,14 @@ class Matrix:
     def popcnt_row(self, row: int) -> int:
         """ computes the hamming weight of a row"""
         assert row < self.nrows
-        return sum(self.data[row])
+        return sum(1 for d in self.data[row] if d != 0)
         
     def popcnt_col(self, col: int) -> int:
         """ computes the hamming weight of a column"""
         assert col < self.ncols
         t = 0
         for j in range(self.nrows):
-            t += self.data[j][col]
+            t += int(self.data[j][col] != 0)
         return t
 
     def swap_rows(self, i: int, j: int) -> None:
@@ -190,11 +197,18 @@ class Matrix:
             self.data[k][i] = self.data[k][j]
             self.data[k][j] = tmp
 
+    def copy(self) -> 'Matrix':
+        """ deep copy """
+        C = Matrix(self.nrows, self.ncols, self.q)
+        C.data = [row[:] for row in self.data]
+        return C
+
     def __add__(self, B: 'Matrix'):
-        return self.add(B)
+        # NOTE: `A + B` must not modify `A`
+        return self.copy().add(B)
 
     def __sub__(self, B: 'Matrix'):
-        return self.sub(B)
+        return self.copy().sub(B)
 
     def __mul__(self, B: 'Matrix'):
         return self.mul(B)

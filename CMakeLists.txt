@@ -2,7 +2,8 @@ cmake_minimum_required(VERSION 3.20)
 project(decoding)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_VERBOSE_MAKEFILE ON)
-set(CMAKE_CXX_STANDARD 20)
+# NOTE: cryptanalysislib needs C++23 (e.g. `static` variables in `constexpr` functions)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # options
@@ -13,7 +14,7 @@ option(USE_LTO "Enable -flto" OFF)
 option(USE_PROFILE "Enable profile guided optmization" OFF)
 option(USE_POLLY "Enable polly loop optimization" OFF)
 option(USE_BOLT "Enable bolt binary optmization" OFF)
-option(USE_TRACY "Enable tracy profiling" ON)
+option(USE_TRACY "Enable tracy profiling" OFF)
 
 set(default_build_type "Release")
 
@@ -35,49 +36,52 @@ endif()
 include(FetchContent)
 include(ExternalProject)
 include(CheckCXXCompilerFlag) 	# check for compiler optimization flags
+include(CheckCXXSourceCompiles) # check for libraries
 include(CheckIPOSupported)  	# check for -flto
 include(CheckLanguage) 			# needed for `check_language(CUDA)`
 
-# load the external main project. This encloses all helper functions.
-ExternalProject_Add(cryptanalysislib_project
-        SOURCE_DIR        ${CMAKE_SOURCE_DIR}/deps/cryptanalysislib
-        CONFIGURE_COMMAND cd <SOURCE_DIR> && mkdir -p build
-        COMMAND           cd <SOURCE_DIR> && cd build/ && cmake ..
-        BUILD_COMMAND     cd <SOURCE_DIR> && cd build/ && make -j8
-        INSTALL_COMMAND   ""
-        TEST_COMMAND      ""
-)
+# NOTE: cryptanalysislib is header only, hence it is not build (neither its
+# tests nor its benchmarks). Only its `src` directory is included below.
 
-
-include("deps/cryptanalysislib/deps/cmake_optimize_for_architecture/HostOptimizations.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/deps/cryptanalysislib/deps/cmake_optimize_for_architecture/HostOptimizations.cmake")
 
 check_cxx_compiler_flag(-march=native COMPILER_SUPPORTS_MARCH_NATIVE)
 check_cxx_compiler_flag(-fno-inline COMPILER_SUPPORTS_NO_INLINE)
-check_cxx_compiler_flag(-fsanitize=address COMPILER_SUPPORTS_SANITIZE_ADDRESS) # TODO support not recognized
+# NOTE: the sanitizer runtime is needed at link time
+set(CMAKE_REQUIRED_LINK_OPTIONS -fsanitize=address)
+check_cxx_compiler_flag(-fsanitize=address COMPILER_SUPPORTS_SANITIZE_ADDRESS)
+unset(CMAKE_REQUIRED_LINK_OPTIONS)
 check_cxx_compiler_flag(-fsanitize=memory COMPILER_SUPPORTS_SANITIZE_MEMORY)
 check_cxx_compiler_flag(-fconstexpr-steps=9999999 COMPILER_SUPPORTS_CONSTEXPR_COST)
 check_cxx_compiler_flag(-fno-exceptions COMPILER_SUPPORTS_NO_EXCEPTION)
 check_ipo_supported(RESULT lto_supported OUTPUT error)
-check_cxx_compiler_flag(-latomic LINKER_SUPPORTS_ATOMIC) # TODO
+# NOTE: `-l` is a linker flag, hence a library check
+set(CMAKE_REQUIRED_LIBRARIES atomic)
+check_cxx_source_compiles("int main() { return 0; }" LINKER_SUPPORTS_ATOMIC)
+unset(CMAKE_REQUIRED_LIBRARIES)
 
 # find needed packages: the good thing only is: we only have a single external
 # dependencies. 
 enable_testing()
-find_package(OpenMP REQUIRED)
+# NOTE: only C++ is compiled, the C compiler may lack OpenMP (AppleClang)
+find_package(OpenMP REQUIRED COMPONENTS CXX)
 find_package(Threads REQUIRED)
 find_package(GTest) 
 find_package(benchmark)
 find_package(Git QUIET)
 
 # init the submodules
-FetchContent_Declare(
-	tracy
-	GIT_REPOSITORY 	https://github.com/wolfpld/tracy
-	GIT_TAG 		master
-	GIT_SHALLOW 	TRUE
-	GIT_PROGRESS 	TRUE
-)
-FetchContent_MakeAvailable(tracy)
+# NOTE: only download tracy if it is actually used.
+if(USE_TRACY)
+	FetchContent_Declare(
+		tracy
+		GIT_REPOSITORY 	https://github.com/wolfpld/tracy
+		GIT_TAG 		v0.14.1
+		GIT_SHALLOW 	TRUE
+		GIT_PROGRESS 	TRUE
+	)
+	FetchContent_MakeAvailable(tracy)
+endif()
 
 # global include directories
 include_directories("deps/b63/include/b63")
@@ -90,14 +94,15 @@ link_directories("/usr/local/lib")
 # two possible options. 'tcmalloc' is the standard google malloc implementation
 if(USE_TCMALLOC)
 	message(STATUS "Using tcmalloc")
-	set(MALLOC_LIBRARY_FLAGS "tcmalloc")
+	# NOTE: the test targets link against `TCMALLOC_LIBRARIES`
+	set(TCMALLOC_LIBRARIES "tcmalloc")
 endif()
 
-#if(USE_SANITIZER AND COMPILER_SUPPORTS_SANITIZE_ADDRESS)
+if(USE_SANITIZER AND COMPILER_SUPPORTS_SANITIZE_ADDRESS)
 	message(STATUS "Using address sanitize")
 	# possible sanitizers = -fsanitize=[address,leak,thread,memory,undefined]
 	set(SANITIZER_FLAGS "-fsanitize=address -fsanitize=pointer-compare -fno-omit-frame-pointer")
-#endif()
+endif()
 
 if(USE_NOINLINE AND COMPILER_SUPPORTS_NO_INLINE)
 	message(STATUS "not inlining")
@@ -113,7 +118,11 @@ if(lto_supported AND USE_LTO)
   set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
 endif()
 
-set(ALLOWED_WARNINGS " -Wno-unknown-pragmas -Wno-c99-designator -Wno-invalid-constexpr -Wno-unused-function -Wno-zero-length-array")
+set(ALLOWED_WARNINGS " -Wno-unknown-pragmas -Wno-invalid-constexpr -Wno-unused-function")
+# NOTE: clang only flags, gcc warns about them
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+	set(ALLOWED_WARNINGS "${ALLOWED_WARNINGS} -Wno-c99-designator -Wno-zero-length-array")
+endif()
 
 message(STATUS "System Processor: ${CMAKE_SYSTEM_PROCESSOR}")
 
@@ -134,6 +143,10 @@ set(LINK_TEST_FLAGS
 	Threads::Threads 
 	OpenMP::OpenMP_CXX
 )
+
+if(LINKER_SUPPORTS_ATOMIC)
+	list(APPEND LINK_TEST_FLAGS atomic)
+endif()
 
 if(USE_TRACY)
 	message(STATUS "Using tracy")
@@ -228,8 +241,8 @@ include_directories("deps/cryptanalysislib/deps/b63/include/b63")
 include_directories("deps/cryptanalysislib/src")
 
 include_directories("src")
-include_directories("test/decoding/challenges")
-include_directories("test/mceliece/challenges")
+include_directories("tests/decoding/challenges")
+include_directories("tests/mceliece/challenges")
 include_directories("/usr/local/include")
 
 link_directories("/usr/local/lib")
@@ -258,6 +271,15 @@ add_custom_target (
 #TODO add_executable(main main.cpp)
 # target_link_libraries(main ${LINK_TEST_FLAGS})
 
+# NOTE: there is currently no `main.cpp`. All targets below depend on it.
+if(NOT EXISTS ${CMAKE_SOURCE_DIR}/main.cpp)
+	if(USE_PROFILE OR USE_POLLY)
+		message(WARNING "USE_PROFILE/USE_POLLY need a `main.cpp`, which does not exist. Ignoring them.")
+	endif()
+	set(USE_PROFILE OFF)
+	set(USE_POLLY OFF)
+endif()
+
 if(USE_PROFILE)
 	add_executable(main_analysis1 main.cpp)
 	target_link_libraries(main_analysis1 ${LINK_TEST_FLAGS} -fprofile-instr-generate=code.profraw)
@@ -278,7 +300,8 @@ if(USE_PROFILE)
 	add_dependencies(main_profile2 LLVM_PROFDATA)
 endif()
 
-if (CMAKE_CXX_COMPILER_ID STREQUAL "clang")
+# NOTE: the compiler id is `Clang` (or `AppleClang`), never `clang`
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND EXISTS ${CMAKE_SOURCE_DIR}/main.cpp)
     add_executable(main_PGO_instrumentation_first main.cpp)
     target_compile_options(main_PGO_instrumentation_first PUBLIC -fprofile-instr-generate -DUSE_LOOPS=2)
     target_link_libraries(main_PGO_instrumentation_first ${LINK_TEST_FLAGS} -fprofile-instr-generate)

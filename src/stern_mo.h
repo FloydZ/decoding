@@ -21,14 +21,14 @@ public:
 #ifdef EXPECTED_PERMUTATIONS
 		return EXPECTED_PERMUTATIONS;
 #else
-		return 1; // TODO
+		return bc(n, w)/( bc(n-k, w-2*p) * bc(k/2, p) * bc(k/2, p));
 #endif
 	}
 
 	void print() const noexcept {
 		ConfigISD::print();
 		std::cout << "{ "
-		          << ", \"r\": " << r
+		          << "\"r\": " << r
 				  << ", \"N\": " << N
 				  << ", \"dk\": " << dk
 				  << ", \"nnk\": " << nnk
@@ -87,6 +87,8 @@ public:
 		algo.L2 = (NNElement *)stern_MO_L2;
 	}
 
+	// NOTE: `stern_MO_L1/L2` are owned by `algo`, which frees them in `~NN`.
+
 	/// reconstruct the solution
 	void __attribute__ ((noinline))
 	reconstruct() {
@@ -98,14 +100,14 @@ public:
 		bool foundl = false, foundr = false;
 
 		for (size_t i = 0; i < list_enumeration_size; i++) {
-			biject<k, p>(i, rows);
+			biject<list_enumeration_length, p>(i, rows);
 			bool correctl = true;
 			bool correctr = true;
 
 			tmpl.zero(); tmpr = ws;
 
 			for (uint16_t j = 0; j < p; j++) {
-				ASSERT(rows[j] < kl_half);
+				assert(rows[j] < kl_half);
 				Label::add(tmpl.ptr(), tmpl.ptr(), HT[rows[j]]);
 				Label::add(tmpr.ptr(), tmpr.ptr(), HT[rows[j] + list_enumeration_length]);
 			}
@@ -118,7 +120,7 @@ public:
 			}
 
 			if (correctl) {
-				ASSERT(!foundl);
+				assert(!foundl);
 				foundl = true;
 				for (uint32_t j = 0; j < p; j++) {
 					solutions[j] = rows[j];
@@ -126,7 +128,7 @@ public:
 			}
 
 			if (correctr) {
-				ASSERT(!foundr);
+				assert(!foundr);
 				foundr = true;
 				for (uint32_t j = 0; j < p; j++) {
 					solutions[p + j] = rows[j] + list_enumeration_length;
@@ -134,19 +136,19 @@ public:
 			}
 		}
 
-		ASSERT(foundl);
-		ASSERT(foundr);
+		assert(foundl);
+		assert(foundr);
+		(void)foundl;
+		(void)foundr;
 
 		Error tmpe, tmpe2;
 		Label tmp; tmp.zero();
 		// copy in the syndrome
 		tmp = ws;
 		for (uint32_t i = 0; i < 2*p; ++i) {
-			ASSERT(solutions[i] < k+l);
+			assert(solutions[i] < k+l);
 			Label::add(tmp.ptr(), tmp.ptr(), HT.row(solutions[i]));
 		}
-
-		tmp.print();
 
 		// reversing and shit
 		for (uint32_t i = 0; i < n-k; ++i) {
@@ -154,9 +156,8 @@ public:
 			tmpe.set(bit, 0, n-k-1-i);
 		}
 
-		tmpe.print();
 		for (uint32_t i = 0; i < 2*p; ++i) {
-			ASSERT(n-k-l + solutions[i] < n);
+			assert(n-k-l + solutions[i] < n);
 			tmpe.set(1, 0, n-k-l + solutions[i]);
 		}
 
@@ -173,12 +174,12 @@ public:
 		alignas(32) uint16_t rows[p];
 
 		for (size_t i = 0; i < list_enumeration_size; i++) {
-			biject<k, p>(i, rows);
+			biject<list_enumeration_length, p>(i, rows);
 			tmpl.zero(); tmpr = ws;
 
 			#pragma unroll
 			for (uint16_t j = 0; j < p; j++) {
-				ASSERT(rows[j] < kl_half);
+				assert(rows[j] < kl_half);
 				Label::add(tmpl.ptr(), tmpl.ptr(), HT[rows[j]]);
 				Label::add(tmpr.ptr(), tmpr.ptr(), HT[rows[j] + list_enumeration_length]);
 			}
@@ -214,7 +215,10 @@ public:
 			apply_nearest_neighbour();
 		}
 
-		reconstruct();
+		// `reconstruct` asserts that a solution exists
+		if (!not_found) {
+			reconstruct();
+		}
 		return loops;
 	}
 

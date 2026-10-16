@@ -8,37 +8,26 @@ jobs:
       matrix:
         # ubuntu 20 doesnt support c++20
         #os: [ubuntu-22.04, ubuntu-20.04]
-        os: [ubuntu-22.04]
-          # TODO currently not working. The CI does not find omp? Probably need 
-          # to install the correct omp version for the correct compiler
-          # compiler: [ g++-10, clang++-11, clang++-12, clang++-13, clang++-14, clang++-15]
+        # NOTE: C++23 needs a newer gcc than ubuntu-22.04's gcc-11
+        os: [ubuntu-24.04]
+        compiler: [ g++-14 ]
         build_type: [Release, Debug]
 
     name: Build & test on ${{ matrix.os }} with ${{ matrix.compiler }} in ${{ matrix.build_type }} mode.
     runs-on: ${{ matrix.os }}
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
       with:
         submodules: recursive
 
     - name: Install Software
       run: |
-        sudo apt-get install -y libtbb-dev llvm-11 clang-11 llvm-12 clang-12 llvm-13 clang-13 llvm-14 clang-14 llvm-15 clang-15 gcc-10
-        # libomp-11-dev libomp-12-dev libomp-13-dev libomp-14-dev libomp-15-dev libomp5-11 libomp5-12 libomp5-13 libomp5-14 libomp5-15
-
-    - name: Install Google Benchmark
-      run: git clone --depth=1 --single-branch --branch v1.7.1 https://github.com/google/benchmark.git benchmark && mkdir -p benchmark/build && cd ./benchmark/build &&  cmake -DCMAKE_BUILD_TYPE=Release -DBENCHMARK_ENABLE_GTEST_TESTS=OFF ../ && make -j
-
-    - name: Install gtest
-      run:
-        sudo apt-get install libgtest-dev && cd /usr/src/gtest && sudo cmake CMakeLists.txt && sudo make && sudo cp lib/libgtest.a /usr/lib  && sudo cp lib/libgtest_main.a /usr/lib && sudo ln -s /usr/lib/libgtest.a /usr/local/lib/libgtest.a && sudo ln -s /usr/lib/libgtest_main.a /usr/local/lib/libgtest_main.a
-
+        sudo apt-get update
+        sudo apt-get install -y libtbb-dev ${{ matrix.compiler }} libgtest-dev libbenchmark-dev
 
     - name: Configure CMake
-      #      env:
-      #        CXX: ${{ matrix.compiler }}
-      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{matrix.build_type}}
+      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{matrix.build_type}} -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
 
     - name: Build
       run: cmake --build ${{github.workspace}}/build --config ${{matrix.build_type}}

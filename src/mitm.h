@@ -5,7 +5,7 @@
 #include "combination/chase.h"
 #include "matrix/matrix.h"
 #include "container/hashmap.h"
-#include "popcount/popcount.h"
+#include "algorithm/bits/popcount.h"
 #include "math/bc.h"
 #include "alloc/alloc.h"
 #include "helper.h"
@@ -33,7 +33,8 @@ public:
 		CollisionType ret;
 		ret.__data = data;
 		if constexpr (strive == 1) {
-			memcpy(ret.index, index, p*sizeof(index_type));
+			// NOTE: the last argument is the number of elements, not bytes
+			cryptanalysislib::memcpy(ret.index, index, p);
 		} else {
 			for (uint32_t i = 0; i < p; ++i) {
 				ret.index[i] = index[i*strive];
@@ -67,7 +68,8 @@ public:
 		static_assert(strive > 0);
 		SternCollisionType ret;
 		if constexpr (strive == 1) {
-			memcpy(ret.index, index, p*sizeof(index_type));
+			// NOTE: the last argument is the number of elements, not bytes
+			cryptanalysislib::memcpy(ret.index, index, p);
 		} else {
 			for (uint32_t i = 0; i < p; ++i) {
 				ret.index[i] = index[i*strive];
@@ -155,6 +157,13 @@ public:
 	            cle *cL=nullptr) noexcept :
 	   hm(hm), lHT(lHT), cL(cL) {}
 
+	/// NOTE: the row indices are `uint16_t`, the index type of the hashmap may be wider
+	constexpr static inline HM_DataType create(const l_type data, const uint16_t *rows) noexcept {
+		HM_DataType_IndexType index[p];
+		for (uint32_t j = 0; j < p; ++j) { index[j] = rows[j]; }
+		return HM_DataType::create(data, index);
+	}
+
 	constexpr inline void step(const l_type syndrome, const uint32_t tid=0, const bool simd=true) noexcept {
 		if (simd) {
 			fill_hashmap_simd(syndrome, tid);
@@ -168,7 +177,7 @@ public:
 	constexpr bool check_hashmap2(const l_type syndrome, const uint16_t *index,
 	                              const size_t nr_of_index, const uint32_t bits,
 	                              const uint32_t offset=0) noexcept {
-		const l_type mask = ((1u << bits) - 1u) << offset;
+		const l_type mask = (bits >= sizeof(l_type)*8u ? l_type(-1) : l_type((l_type(1) << bits) - 1u)) << offset;
 
 		l_type v = 0;
 		for (uint32_t i = 0; i < nr_of_index; ++i) {
@@ -176,7 +185,7 @@ public:
 		}
 
 		v &= mask;
-		return v == syndrome;
+		return v == (syndrome & mask);
 	}
 
 	/// first clears the internal hashmap
@@ -192,20 +201,21 @@ public:
 		const size_t end   = tid == threads-1 ? enumeration_size : enumeration_size_per_thread * (tid + 1);
 
 		if constexpr (config.use_changelist) {
-			ASSERT(!config.save_index);
-			ASSERT(cL);
+			assert(!config.save_index);
+			assert(cL);
 
-			chase<enumeration_length, enumeration_weight> c;
+			chase_t<enumeration_length, enumeration_weight> c;
 
 			l_type tmp = syndrome;
-			for (uint32_t i = 0; i < p; ++i) { tmp ^= lHT[i]; }
+			c.biject(start, rows);
+			for (uint32_t i = 0; i < p; ++i) { tmp ^= lHT[rows[i]]; }
 
 			for (size_t i = start; i < end; i++) {
 				if constexpr (config.save_index) {
 					hm->insert(tmp, HM_DataType::create(tmp, (HM_DataType_IndexType *)&i));
 				} else {
 					c.biject(i, rows);
-					hm->insert(tmp, HM_DataType::create(tmp, (HM_DataType_IndexType *)rows));
+					hm->insert(tmp, create(tmp, rows));
 				}
 
 				tmp ^= lHT[cL[i].first] ^ lHT[cL[i].second];
@@ -223,12 +233,12 @@ public:
 				/// NOTE: this assert only makes sense if we are in the stern case.
 				/// In the BJMM/MO case we normally compute bigger l1/l2 to ensure we have this
 				/// data already in the hashmap for subsequece steps in the tree
-				//ASSERT(tmp < (1u << l));
+				//assert(tmp < (1u << l));
 
 				if constexpr (config.save_index) {
 					hm->insert(tmp, HM_DataType::create(tmp, (HM_DataType_IndexType *)&i));
 				} else {
-					hm->insert(tmp, HM_DataType::create(tmp, (HM_DataType_IndexType *)rows));
+					hm->insert(tmp, create(tmp, rows));
 				}
 			}
 		}
@@ -240,6 +250,12 @@ public:
 	/// simultaneous
 	constexpr void fill_hashmap_simd(const l_type syndrome, const uint32_t tid=0) noexcept {
 		static_assert(sizeof(l_type) >= 4);
+		static_assert(sizeof(HM_DataType_IndexType) <= sizeof(uint32_t));
+		// number of `HM_DataType_IndexType` per 32-bit simd lane. NOTE: lane `j`
+		// of `rows[m]` (or `a`) starts at index `ratio*j` when viewed as an array
+		// of `HM_DataType_IndexType`, and `rows[m]` is `8*ratio` such elements long.
+		constexpr uint32_t ratio = sizeof(uint32_t) / sizeof(HM_DataType_IndexType);
+
 		// first clear it
 		hm->clear(tid);
 
@@ -247,13 +263,25 @@ public:
 		const size_t end   = tid == threads-1 ? enumeration_size : enumeration_size_per_thread * (tid + 1);
 		size_t i = start;
 
+		// inserts the `j`-th of the 8 elements computed in the current iteration
+		auto insert = [&](const l_type tmp, const uint32x8_t &a, const uint32x8_t *rows, const uint32_t j)
+		        __attribute__((always_inline)) {
+			if constexpr (config.save_index) {
+				hm->insert(tmp, HM_DataType::template
+					create<1>(tmp, ((HM_DataType_IndexType *)a.v32) + ratio*j));
+			} else {
+				hm->insert(tmp, HM_DataType::template
+					create<8*ratio>(tmp, ((HM_DataType_IndexType *)rows) + ratio*j));
+			}
+		};
+
 		if constexpr (sizeof(l_type) == 4) {
 			alignas(32) uint32x8_t rows[p]{};
 			alignas(32) uint32x8_t a = uint32x8_t::setr(start+0, start+1, start+2, start+3, start+4, start+5, start+6, start+7);
 			alignas(32) const uint32x8_t eight = uint32x8_t::set1(8);
 			alignas(32) const uint32x8_t syndrome_ = uint32x8_t::set1(syndrome);
 
-			for (; i + 8 < end; i += 8) {
+			for (; i + 8 <= end; i += 8) {
 				biject_simd<enumeration_length, p>(a, rows);
 				alignas(32) uint32x8_t tmp = syndrome_;
 
@@ -265,54 +293,45 @@ public:
 
 				#pragma unroll 8
 				for (uint16_t j = 0; j < 8; j++) {
-					if constexpr (config.save_index){
-						hm->insert(tmp.v32[j], HM_DataType::template
-							create<8>(tmp.v32[j], ((HM_DataType_IndexType *)a.v32) + j));
-					} else {
-						hm->insert(tmp.v32[j], HM_DataType::template
-							create<8>(tmp.v32[j], ((HM_DataType_IndexType *)rows) + j));
-					}
+					insert(tmp.v32[j], a, rows, j);
 				}
 
 				a = a + eight;
 			}
 		} else if constexpr (sizeof(l_type) == 8){
-			alignas(32) uint32x8_t rows[p];
+			alignas(32) uint32x8_t rows[p]{};
 			alignas(32) uint32x8_t a = uint32x8_t::setr(start+0, start+1, start+2, start+3, start+4, start+5, start+6, start+7);
 			alignas(32) const uint32x8_t eight = uint32x8_t::set1(8);
 			alignas(32) const uint64x4_t syndrome_ = uint64x4_t::set1(syndrome);
 
-			for (; i + 8 < end; i += 8) {
+			for (; i + 8 <= end; i += 8) {
 				biject_simd<enumeration_length, p>(a, rows);
+				// `tmp1` holds the elements 0-3, `tmp2` the elements 4-7
 				alignas(32) uint64x4_t tmp1 = syndrome_;
 				alignas(32) uint64x4_t tmp2 = syndrome_;
 
 				#pragma unroll p
 				for (uint16_t j = 0; j < p; j++) {
-					const auto data1 = uint32x8_t::template gather<4>(lHT, rows[j].v128[0]);
-					const auto data2 = uint32x8_t::template gather<4>(lHT, rows[j].v128[1]);
-					tmp1 ^= data1;
-					tmp2 ^= data2;
+					// NOTE: the lHT entries are 64 bit, so gather 4 at a time
+					// using the lower/upper 4 row indices.
+					alignas(32) uint64x4_t idx1, idx2;
+					for (uint32_t m = 0; m < 4; m++) {
+						idx1.v64[m] = rows[j].v32[m];
+						idx2.v64[m] = rows[j].v32[4 + m];
+					}
+
+					tmp1 ^= uint64x4_t::template gather<8>(lHT, idx1);
+					tmp2 ^= uint64x4_t::template gather<8>(lHT, idx2);
 				}
 
+				#pragma unroll 4
 				for (uint16_t j = 0; j < 4; j++) {
-					if constexpr (config.save_index) {
-						hm->insert(tmp1.v32[j], HM_DataType::template
-							create<8>(tmp1.v32[j], ((HM_DataType_IndexType *)a.v64) + j));
-					} else {
-						hm->insert(tmp1.v32[j], HM_DataType::template
-							create<8>(tmp1.v32[j], ((HM_DataType_IndexType *)rows) + j));
-					}
+					insert(tmp1.v64[j], a, rows, j);
 				}
 
-				for (uint16_t j = 4; j < 8; j++) {
-					if constexpr (config.save_index) {
-						hm->insert(tmp2.v32[j], HM_DataType::template
-							create<8>(tmp2.v32[j], ((HM_DataType_IndexType *)a.v64) + j));
-					} else {
-						hm->insert(tmp2.v32[j], HM_DataType::template
-							create<8>(tmp2.v32[j], ((HM_DataType_IndexType *)rows) + j));
-					}
+				#pragma unroll 4
+				for (uint16_t j = 0; j < 4; j++) {
+					insert(tmp2.v64[j], a, rows, 4 + j);
 				}
 
 				a = a + eight;
@@ -333,12 +352,12 @@ public:
 			/// NOTE: this assert only makes sense if we are in the stern case.
 			/// In the BJMM/MO case we normally compute bigger l1/l2 to ensure we have this
 			/// data already in the hashmap for subsequece steps in the tree
-			//ASSERT(tmp < (1u << l));
+			//assert(tmp < (1u << l));
 
 			if constexpr (config.save_index) {
 				hm->insert(tmp, HM_DataType::create(tmp, (HM_DataType_IndexType *)&i));
 			} else {
-				hm->insert(tmp, HM_DataType::create(tmp, (HM_DataType_IndexType *)__rows));
+				hm->insert(tmp, create(tmp, __rows));
 			}
 		}
 	}
@@ -359,7 +378,7 @@ public:
 				  << ", \"enumeration_size\": " << enumeration_size
 				  << ", \"enumeration_weight\": " << enumeration_weight
 				  << " } " << std::endl;
-		hm->print();
+		hm->info();
 	}
 };
 
@@ -409,11 +428,13 @@ public:
 	constexpr inline bool step(const l_type iT, F &&f,
 	                           const uint32_t tid=0,
 	                           const bool simd=true) noexcept {
-		if (simd) {
-			return coll_hashmap_simple_simd(iT, tid, f);
-		} else {
-			return coll_hashmap_simple(iT, tid, f);
+		// NOTE: the SIMD version passes the rows as `uint32_t *`
+		if constexpr (std::is_invocable_v<F, l_type, l_type, uint32_t *, uint32_t *, uint32_t>) {
+			if (simd) {
+				return coll_hashmap_simple_simd(iT, tid, f);
+			}
 		}
+		return coll_hashmap_simple(iT, tid, f);
 	}
 
 	/// computes the right list and start searching for collision
@@ -424,25 +445,29 @@ public:
 	/// \param f lambda function to execute for each collision (make sure its thread safe)
 	/// \return if found
 	template<typename F>
-	bool coll_hashmap_simple(const l_type iT, const uint32_t tid, F &&f) {
-		const size_t start = enumeration_size_per_thread * tid;
+	bool coll_hashmap_simple(const l_type iT, const uint32_t tid, F &&f, const size_t first = 0) {
+		const size_t start = std::max(first, enumeration_size_per_thread * tid);
 		const size_t end   = tid == threads-1 ? enumeration_size : enumeration_size_per_thread * (tid + 1);
 
 		if constexpr (config.use_changelist) {
-			ASSERT(cL);
+			assert(cL);
+
+			chase_t<enumeration_length, enumeration_weight> c;
+			alignas(32) uint16_t rows[p];
+			c.biject(start, rows);
 
 			l_type tmp = iT;
-			for (uint32_t i = 0; i < p; ++i) { tmp ^= lHTr[i]; } // TODO correct start
+			for (uint32_t i = 0; i < p; ++i) { tmp ^= lHTr[rows[i]]; }
 			for (size_t right_index = start; right_index < end;
 				 right_index++) {
 
 				// for every collision.
 				typename HashMap::load_type left_load;
 				const size_t left_base = hm->find(tmp, left_load);
+				const uint32_t right_index32 = (uint32_t)right_index;
 				for (uint64_t j = left_base; j < left_base + left_load; j++) {
-					const auto ind = hm->ptr(j).index;
-					f(tmp, hm->ptr(j).data, (HM_DataType_IndexType *)&ind,
-					  (HM_DataType_IndexType *)right_index, 1);
+					f(tmp, hm->ptr(j).data(), (HM_DataType_IndexType *)hm->ptr(j).index,
+					  (HM_DataType_IndexType *)&right_index32, 1);
 				}
 
 				tmp ^= lHTr[cL[right_index].first] ^ lHTr[cL[right_index].second];
@@ -458,9 +483,10 @@ public:
 				l_type tmp = iT; // first add the intermediate target
 				biject<enumeration_length, p>(right_index, rows2);
 
+				// NOTE: the right list starts at `n_half - epsilon` (same as `lHTr`)
 				#pragma unroll p
 				for (uint16_t j = 0; j < p; j++) {
-					rows2[j] += enumeration_length;
+					rows2[j] += n_half - config.epsilon;
 					tmp ^= lHT[rows2[j]];
 				}
 
@@ -485,13 +511,15 @@ public:
 
 	/// NOTE the following limitations
 	/// - listType must be uint32_T
-	/// - 2**l * HM1_BucketSize < 2**32
+	/// - 2**l * HM1_BucketSize * sizeof(HM_DataType) < 2**31
 	/// NOTE: sorting of the final list is not possible because im not working
 	/// 	on each bucket separate, but at 8 at the same time, meaning the
 	/// 	right list is always sorted in a way.
+	/// NOTE: `f` gets the rows of `nr_cols` collisions: row s of collision c is `index[s*8 + c]`
 	template<typename F>
 	bool coll_hashmap_simple_simd(const l_type iT, const uint32_t tid, F &&f) noexcept {
 		static_assert(sizeof(l_type) == 4);
+		static_assert(sizeof(HM_DataType_IndexType) <= 4);
 
 		const size_t start = enumeration_size_per_thread * tid;
 		const size_t end   = tid == threads-1 ? enumeration_size : enumeration_size_per_thread * (tid + 1);
@@ -500,11 +528,17 @@ public:
 		alignas(32) uint32x8_t right_index = uint32x8_t::setr(start+0, start+1, start+2, start+3, start+4, start+5, start+6, start+7);
 		constexpr uint32x8_t eight  = uint32x8_t::set1(8);
 		constexpr uint32x8_t offset = uint32x8_t::set1(HM1_BUCKETSIZE);
-		constexpr uint32x8_t hm_load_mask = uint32x8_t::set1(0xff);
+		static_assert(sizeof(HM_LoadType) <= 4);
+		// NOTE: the gather reads 4 bytes, the load is in the upper bytes
+		constexpr uint32_t load_shift = 4 - sizeof(HM_LoadType);
+		constexpr uint32x8_t entry_size = uint32x8_t::set1(sizeof(HM_DataType));
+		constexpr uint32x8_t right_offset = uint32x8_t::set1(n_half - config.epsilon);
+		constexpr uint32x8_t index_mask = uint32x8_t::set1(sizeof(HM_DataType_IndexType) == 4 ?
+		        uint32_t(-1) : uint32_t((1ull << (8*sizeof(HM_DataType_IndexType))) - 1ull));
 
 		// iterate the right list
-		for (size_t right_index_ = start; right_index_ + 8 < end;
-				right_index_+=8) {
+		size_t right_index_ = start;
+		for (; right_index_ + 8 <= end; right_index_+=8) {
 			biject_simd<enumeration_length, p>(right_index, rows);
 			uint32x8_t tmp = uint32x8_t::set1(iT);
 
@@ -518,7 +552,7 @@ public:
 			const uint32x8_t hashmap_offset = tmp * offset;
 			const uint32x8_t left_load = uint32x8_t::template gather
 			        <sizeof(HM_LoadType)>
-			        (hm->__internal_load_array, tmp) & hm_load_mask;
+			        ((const uint8_t *)hm->__internal_load_array.data() - load_shift, tmp) >> (8*load_shift);
 
 			#pragma unroll
 			for (uint64_t j = 0; j < HM1_BUCKETSIZE; j++) {
@@ -532,34 +566,58 @@ public:
 
 				// const listType left_index = hm->__internal_hashmap_array[hashmap_offset + j];
 				const uint32x8_t lookup = hashmap_offset + j1;
-				const uint32x8_t left_index = uint32x8_t::template gather
-				        <sizeof(HM_DataType)>
-				        (hm->ptr(), lookup);
-
 				const uint32x8_t shufmask = uint32x8_t::pack(mask2);
-				const uint32x8_t lt = uint32x8_t::permute(left_index,  shufmask);
-				const uint32x8_t rt = uint32x8_t::permute(right_index, shufmask);
 				const uint32_t nr_cols = popcount::popcount(mask2);
 
-				for (uint32_t v = 0; v < nr_cols; v++){
-					f(0, 0, (HM_DataType_IndexType *)lt.v32, (HM_DataType_IndexType *)rt.v32, nr_cols);
+				if constexpr (p == 1) {
+					const uint32x8_t left_index = uint32x8_t::template gather<1>
+					        ((const uint8_t *)hm->ptr() + offsetof(HM_DataType, index),
+					         lookup * entry_size) & index_mask;
+					const uint32x8_t lt = uint32x8_t::permute(left_index,  shufmask);
+					const uint32x8_t rt = uint32x8_t::permute(rows[0] + right_offset, shufmask);
+					f(0, 0, lt.v32, rt.v32, nr_cols);
+				} else {
+					alignas(32) uint32_t lt[8*p], rt[8*p];
+					#pragma unroll
+					for (uint32_t s = 0; s < p; s++) {
+						const uint32x8_t left_index = uint32x8_t::template gather<1>
+						        ((const uint8_t *)hm->ptr() + offsetof(HM_DataType, index) + s*sizeof(HM_DataType_IndexType),
+						         lookup * entry_size) & index_mask;
+						uint32x8_t::store(lt + 8*s, uint32x8_t::permute(left_index, shufmask));
+						uint32x8_t::store(rt + 8*s, uint32x8_t::permute(rows[s] + right_offset, shufmask));
+					}
+					f(0, 0, lt, rt, nr_cols);
 				}
 
 				//uint32x8_t::store(final_list_left.data() + final_list_current_size, lt);
 				//uint32x8_t::store(final_list_right.data() + final_list_current_size, rt);
 				//final_list_current_size += nr_cols;
-				//ASSERT(final_list_current_size < final_list_real_max_size);
+				//assert(final_list_current_size < final_list_real_max_size);
 			}
 
 			// prepare everything for the next iteration
 			right_index = right_index + eight;
 		}
 
+		// the remaining elements, with the same layout as above
+		coll_hashmap_simple(iT, tid, [&](const l_type a1, const l_type a2,
+		                                 const HM_DataType_IndexType *index1,
+		                                 const HM_DataType_IndexType *index2,
+		                                 const uint32_t nr_cols) {
+			(void)nr_cols;
+			alignas(32) uint32_t lt[8*p], rt[8*p];
+			for (uint32_t s = 0; s < p; s++) {
+				lt[8*s] = index1[s];
+				rt[8*s] = index2[s];
+			}
+			f(a1, a2, lt, rt, 1);
+		}, right_index_);
+
 		return false;
 	}
 
 	void print() const noexcept{
-		hm->print();
+		hm->info();
 		std::cout << "{ \"n\": " << n
 		          << ", \"n/2\": " << n_half
 				  << ", \"p\": " << p
@@ -645,10 +703,11 @@ public:
 			l_type tmp = iT; // first add the intermediate target
 			biject<enumeration_length, p>(right_index, rows3);
 
+			// NOTE: the right list starts at `n_half - epsilon` (same as `lHTr`)
 			#pragma unroll p
 			for (uint16_t j = 0; j < p; j++) {
-				ASSERT((rows3[j] + enumeration_length) < n);
-				rows3[j] += enumeration_length;
+				assert((rows3[j] + n_half - config.epsilon) < n);
+				rows3[j] += n_half - config.epsilon;
 				tmp ^= lHT[rows3[j]];
 			}
 
@@ -669,7 +728,7 @@ public:
 						rows[i] = hm2->ptr(v).index[i];
 					}
 
-					f(tmp2, tmp3, rows, rows+2, 1);
+					f(tmp2, tmp3, rows, rows + 2*p, 1);
 				}
 			}
 		}
@@ -678,8 +737,8 @@ public:
 	}
 
 	constexpr void print() const noexcept{
-		hm1->print();
-		hm2->print();
+		hm1->info();
+		hm2->info();
 		std::cout << " {\"n\": " << n
 				  << ", \"n/2\": " << n_half
 				  << ", \"p\": " << p
@@ -727,9 +786,11 @@ public:
 	                  HMs&...hms) noexcept :
 	    lHT(lHT), lHTr(lHT + enumeration_length), hms(hms...) {
 
+		// TODO: `ls` only has `d` entries, but `2**(d-1) - 1` targets are drawn.
+		static_assert(((1u << (d - 1u)) - 1u) <= d, "not implemented for d > 3");
 		sum = 0;
 		for (uint32_t i = 0; i < ((1u<<(d-1u)) -1u); ++i) {
-			iTs[i] = fastrandombytes_uint64() & ((1ul << config.ls[i]) - 1ul);
+			iTs[i] = rng() & ((1ul << config.ls[i]) - 1ul);
 			sum ^= iTs[i];
 		}
 		iTs[((1u<<(d-1u)) -1u)] = sum;
@@ -738,6 +799,7 @@ public:
 
 	template<typename ...Fs>
 	bool step(const l_type iT, const uint32_t tid = 0, const bool simd=true, Fs& ...fs) {
+		(void)simd; // TODO simd
 		return coll_hashmap_simple(iT, tid, fs...);
 	}
 
@@ -761,6 +823,9 @@ public:
 	bool coll_hashmap_simple_level(const l_type data,
 	                               uint16_t *index,
 	                               const uint32_t tid, Fs& ...fs) {
+		// TODO not implemented yet
+		(void)tid;
+		((void)fs, ...);
 		if constexpr (dd == 1u) {
 			//f(data, index);
 			return false;
@@ -790,7 +855,7 @@ public:
 
 	void print() const noexcept{
 		constexpr_for<0, d, 1>([this](auto i){
-		  	std::get<i>(hms).print();
+		  	std::get<i>(hms).info();
 		});
 
 		std::cout << "{ \"n\": " << n

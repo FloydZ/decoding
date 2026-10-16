@@ -55,17 +55,13 @@ public:
 				tmpe.set(data, 0, n-k-1-i);
 			}
 		} else {
-			// ASSERT(G.element1.label.popcnt() == (w-p));
-			ASSERT(G.element1.value.popcnt() == p);
-
-			G.element1.label.print();
-			G.element1.value.print();
+			// assert(G.element1.label.popcnt() == (w-p));
+			assert(G.element1.value.popcnt() == p);
 
 			Label tmp;
 			Label::sub(tmp, ws, G.element1.label);
-			ws.print();
-			tmp.print();
-			ASSERT(tmp.popcnt() == (w-p));
+			// NOTE: the predicate in `run` accepts every weight, which passes `config.compare`
+			assert(config.compare(tmp.popcnt() + p, w));
 			/// set e1 (get the label)
 			for (uint32_t i = 0; i < n-k; ++i) {
 				const auto data = tmp.get(i);
@@ -97,9 +93,9 @@ public:
 			if constexpr (p == 0) {
 				ISD::template step<false, false, false>();
 				const uint32_t weight = ws.popcnt();
-				ASSERT(weight <= n-k);
-				ASSERT(weight > 0);
-				if (unlikely(weight <= w)) {
+				assert(weight <= n-k);
+				assert(weight > 0);
+				if (unlikely(config.compare(weight, w))) {
 					not_found = false;
 					break;
 				}
@@ -109,10 +105,11 @@ public:
 				auto predicate = [&, this](const Label &in){
 					Label tmp;
 					Label::sub(tmp, ws, in);
-					return tmp.popcnt() <= (w - p);
+					return config.compare(tmp.popcnt() + p, w);
 				};
 
-				const uint32_t tid = Thread::get_tid();
+				// NOTE: not executed within a parallel region
+				const uint32_t tid = 0;
 
 				/// start the iterations
 				bool found = G.template run
