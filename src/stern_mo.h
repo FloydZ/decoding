@@ -59,18 +59,18 @@ public:
 	constexpr static uint32_t kl_half =  k/2;
 	constexpr static uint32_t NR_HT_LIMBS = PCSubMatrix_T::limbs();
 
-	// list shit, todo rename to baselist
-	constexpr static size_t list_enumeration_length = kl_half;
-	constexpr static size_t list_enumeration_weigth = p;
-	constexpr static size_t list_enumeration_size =
-			bc(list_enumeration_length, list_enumeration_weigth);
-	constexpr static size_t size_MO_L = roundToAligned<1024>(list_enumeration_size*sizeof(Label));
+	// baselist
+	constexpr static size_t baselist_enumeration_length = kl_half;
+	constexpr static size_t baselist_enumeration_weigth = p;
+	constexpr static size_t baselist_enumeration_size =
+			bc(baselist_enumeration_length, baselist_enumeration_weigth);
+	constexpr static size_t size_MO_L = roundToAligned<1024>(baselist_enumeration_size*sizeof(Label));
 	Label *stern_MO_L1 = nullptr, *stern_MO_L2 = nullptr;
 
 
 	constexpr static NN_Config nn_config{
 	        n-k, config.r, config.N, config.nnk,
-	        list_enumeration_size, config.dk, w-(2*p), 0, 1024};
+	        baselist_enumeration_size, config.dk, w-(2*p), 0, 1024};
 	NN<nn_config> algo {};
 	using NNElement = typename NN<nn_config>::Element;
 
@@ -99,8 +99,8 @@ public:
 		Label tmpl, tmpr;
 		bool foundl = false, foundr = false;
 
-		for (size_t i = 0; i < list_enumeration_size; i++) {
-			biject<list_enumeration_length, p>(i, rows);
+		for (size_t i = 0; i < baselist_enumeration_size; i++) {
+			biject<baselist_enumeration_length, p>(i, rows);
 			bool correctl = true;
 			bool correctr = true;
 
@@ -109,7 +109,7 @@ public:
 			for (uint16_t j = 0; j < p; j++) {
 				assert(rows[j] < kl_half);
 				Label::add(tmpl.ptr(), tmpl.ptr(), HT[rows[j]]);
-				Label::add(tmpr.ptr(), tmpr.ptr(), HT[rows[j] + list_enumeration_length]);
+				Label::add(tmpr.ptr(), tmpr.ptr(), HT[rows[j] + baselist_enumeration_length]);
 			}
 
 			if (!tmpl.is_equal(((Label*)algo.L1)[soll])) {
@@ -131,7 +131,7 @@ public:
 				assert(!foundr);
 				foundr = true;
 				for (uint32_t j = 0; j < p; j++) {
-					solutions[p + j] = rows[j] + list_enumeration_length;
+					solutions[p + j] = rows[j] + baselist_enumeration_length;
 				}
 			}
 		}
@@ -173,15 +173,15 @@ public:
 		alignas(32) Label tmpl, tmpr;
 		alignas(32) uint16_t rows[p];
 
-		for (size_t i = 0; i < list_enumeration_size; i++) {
-			biject<list_enumeration_length, p>(i, rows);
+		for (size_t i = 0; i < baselist_enumeration_size; i++) {
+			biject<baselist_enumeration_length, p>(i, rows);
 			tmpl.zero(); tmpr = ws;
 
 			#pragma unroll
 			for (uint16_t j = 0; j < p; j++) {
 				assert(rows[j] < kl_half);
 				Label::add(tmpl.ptr(), tmpl.ptr(), HT[rows[j]]);
-				Label::add(tmpr.ptr(), tmpr.ptr(), HT[rows[j] + list_enumeration_length]);
+				Label::add(tmpr.ptr(), tmpr.ptr(), HT[rows[j] + baselist_enumeration_length]);
 			}
 
 			stern_MO_L1[i] = tmpl;
@@ -192,9 +192,9 @@ public:
 	/// generates the two lists L1 and L2 from HT
 	constexpr void apply_nearest_neighbour() noexcept {
 		if constexpr (config.enforce_bf) {
-			algo.bruteforce(list_enumeration_size, list_enumeration_size);
+			algo.bruteforce(baselist_enumeration_size, baselist_enumeration_size);
 		} else {
-			algo.nn(list_enumeration_size, list_enumeration_size);
+			algo.nn(baselist_enumeration_size, baselist_enumeration_size);
 		}
 		if (algo.solutions_nr > 0) {
 			solutions[0] = algo.solutions[0].first;

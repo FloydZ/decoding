@@ -10,11 +10,15 @@ from enum import Enum
 from math import inf
 import argparse
 import re
-import urllib.request
+import os
 import random
 import sys
 import copy
 import json
+try:
+    from .challenge import parse_decodingchallenge, get_decodingchallenge
+except ImportError:  # executed as a script
+    from challenge import parse_decodingchallenge, get_decodingchallenge
 
 
 def create_stern_argparser(parser, subparsers):
@@ -192,63 +196,6 @@ class Range(argparse.Action):
         return
 
 
-def parse_decodingchallenge(lines): 
-    q = 2
-    ctr = 1 #f.readline()        # `# n`
-    n = int(lines[ctr])
-    ctr += 2 # jump over next comment
-    tmp = int(lines[ctr]) # `# seed`(GO) or `k`(SD) or # w (QC)
-    ctr += 2
-    if "vector" in lines[ctr-1]: # QC setting
-        k = n // 2
-        w = tmp
-    else: # GO or SD
-        w = int(lines[ctr])
-        ctr += 2
-        if len(lines[ctr]) <= 3: # ternary
-            q = 3
-            k = w
-            w = int(lines[ctr])
-            ctr += 2
-        else:
-            if tmp == 0: # SD
-                k = n // 2
-            else: # GO 
-                k = tmp
-    assert k > 0 
-    assert w > 0 
-    assert n > 0 
-   
-    H = []
-    while lines[ctr][0] != '#':
-        H.append(lines[ctr])
-        ctr += 1 
-    
-    # `# s^transpose` was already consumed
-    ctr += 1
-    s = lines[ctr].strip("\n")
-    H2 = []
-    # append the identity matrix.
-    for i in range(int(n)-k):
-        H2.append("0"*i + "1" + "0"*(int(n)-k-i-1))
-    
-    for e in H:
-        H2.append(e.strip("\n"))
-    return n, k, w, q, "".join(H2).strip("\n"), s
-
-
-def get_decodingchallenge(url: str):
-    with urllib.request.urlopen(url) as f:
-        lines = f.readlines()
-        lines = [line.decode("utf-8").strip("\n") for line in lines]
-        return parse_decodingchallenge(lines)
-
-
-def test_get_decodingchallenge():
-    url = "https://decodingchallenge.org/Challenges/SD/SD_100_0"
-    print(get_decodingchallenge(url))
-
-
 class Problem:
     """
     This class is needed to abstract away the SD- and SDFq-Problem class
@@ -353,7 +300,7 @@ class Decoding:
 
         # build 
         self.tmp_project_dir = "/tmp/decoding"
-        self.source_dir = "/home/duda/Downloads/crypto/decoding/decoding"# TODO
+        self.source_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
         self.algorithm = algorithm
         self.algoname = self.algorithm.name.lower()
@@ -409,18 +356,22 @@ class Decoding:
         # just a little helper flag to break the cycle like
         # `d.build().write_config().run()` if an error occurs.
         self.__successful_build = False
-        self.__config_file = "../main.h" # TODO
+        self.__config_file = os.path.join(self.source_dir, "main.h")
 
     def gen_random_instance(self):
-        """ creates a random parity check matrix and syndrome. 
-        TODO: no guarantee of the existence of a solution is made.
+        """ creates a random parity check matrix and the syndrome of a random
+        weight `w` error.
         """
-        self.H = ""
-        self.syndrome = ""
-        for _ in range(self.problem.n * (self.problem.n - self.problem.k)):
-            self.H += str(random.randint(0, self.problem.q - 1))
-        for _ in range(self.problem.n - self.problem.k):
-            self.syndrome += str(random.randint(0, self.problem.q - 1))
+        n, k, q, w = self.problem.n, self.problem.k, self.problem.q, self.problem.w
+        h = [random.randint(0, q - 1) for _ in range(n * (n - k))]
+        e = [0] * n
+        for i in random.sample(range(n), w):
+            e[i] = random.randint(1, q - 1)
+
+        # NOTE: `H` is transposed: `H[i][j] = h[j*(n-k) + i]`
+        s = [sum(h[j*(n - k) + i] * e[j] for j in range(n)) % q for i in range(n - k)]
+        self.H = "".join(str(a) for a in h)
+        self.syndrome = "".join(str(a) for a in s)
 
     def write_config(self, config=None):
         """ writes the `main.h` file to `self.__config_file` reading from 
