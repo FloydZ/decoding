@@ -118,7 +118,11 @@ if(lto_supported AND USE_LTO)
   set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
 endif()
 
-set(ALLOWED_WARNINGS " -Wno-unknown-pragmas -Wno-c99-designator -Wno-invalid-constexpr -Wno-unused-function -Wno-zero-length-array")
+set(ALLOWED_WARNINGS " -Wno-unknown-pragmas -Wno-invalid-constexpr -Wno-unused-function")
+# NOTE: clang only flags, gcc warns about them
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+	set(ALLOWED_WARNINGS "${ALLOWED_WARNINGS} -Wno-c99-designator -Wno-zero-length-array")
+endif()
 
 message(STATUS "System Processor: ${CMAKE_SYSTEM_PROCESSOR}")
 
