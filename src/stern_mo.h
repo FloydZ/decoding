@@ -17,6 +17,8 @@ public:
 
 	// debug mode. in case needed, we can enforce bruteforce
 	const bool enforce_bf = false;
+	// runs the NN step on the GPU, needs a CUDA compiler
+	const bool cuda = false;
 	[[nodiscard]] consteval uint64_t compute_loops() const noexcept {
 #ifdef EXPECTED_PERMUTATIONS
 		return EXPECTED_PERMUTATIONS;
@@ -32,9 +34,84 @@ public:
 				  << ", \"N\": " << N
 				  << ", \"dk\": " << dk
 				  << ", \"nnk\": " << nnk
+				  << ", \"cuda\": " << cuda
 				  << " }" << std::endl;
 	}
 };
+
+#ifdef USE_CUDA
+/// builds the two base lists on the GPU, same as
+/// `SternMO::construct_nearest_neighbour_lists`: element `i` of `L1` is the
+/// sum of the `p` rows `biject(i)` of the left half of `HT`, of `L2` the sum
+/// of the same rows of the right half plus the syndrome.
+/// \param HT `2*half` rows of `limbs` limbs each, followed by the syndrome
+template<typename T, const uint32_t limbs, const uint32_t half, const uint32_t p>
+__global__ void sternmo_lists(T *L1, T *L2, const T *HT, const uint32_t size) {
+	static_assert((p >= 1) && (p <= 4) && (p <= half));
+	const T *ws = HT + 2u * half * limbs;
+	const uint32_t stride = gridDim.x * blockDim.x;
+	for (uint32_t i = blockIdx.x * blockDim.x + threadIdx.x; i < size; i += stride) {
+		// same enumeration as `biject`: rows[j] is the max. c < rows[j-1]
+		// with bc(c, p-j) <= x
+		uint32_t rows[p];
+		uint32_t x = i;
+		#pragma unroll
+		for (uint32_t j = 0; j < p; j++) {
+			const uint32_t pj = p - j;
+			uint32_t c;
+			if (pj == 1u) {
+				rows[j] = x;
+				break;
+			} else if (pj == 2u) {
+				c = (uint32_t(sqrtf(8.f * float(x) + 1.f)) + 1u) / 2u;
+			} else if (pj == 3u) {
+				// bc(c, 3) ~ (c - 1)^3 / 6
+				c = uint32_t(cbrtf(6.f * float(x))) + 1u;
+			} else {
+				// bc(c, 4) = ((c^2 - 3c + 1)^2 - 1) / 24
+				c = (uint32_t(sqrtf(4.f * floorf(sqrtf(24.f * float(x) + 1.f)) + 5.f)) + 3u) / 2u;
+			}
+
+			// NOTE: fixes rounding errors of the `float` estimate.
+			// bc(c, pj) is exact in each step of the product.
+			uint64_t b;
+			while (true) {
+				b = 1;
+				#pragma unroll
+				for (uint32_t t = 0; t < pj; t++) { b = b * (c - t) / (t + 1u); }
+				if (b <= x) { break; }
+				c--;
+			}
+			while (true) {
+				uint64_t b1 = 1;
+				#pragma unroll
+				for (uint32_t t = 0; t < pj; t++) { b1 = b1 * (c + 1u - t) / (t + 1u); }
+				if (b1 > x) { break; }
+				b = b1;
+				c++;
+			}
+			rows[j] = c;
+			x -= uint32_t(b);
+		}
+
+		T l[limbs], r[limbs];
+		for (uint32_t j = 0; j < limbs; j++) {
+			l[j] = 0;
+			r[j] = ws[j];
+		}
+		for (uint32_t a = 0; a < p; a++) {
+			for (uint32_t j = 0; j < limbs; j++) {
+				l[j] ^= HT[rows[a] * limbs + j];
+				r[j] ^= HT[(rows[a] + half) * limbs + j];
+			}
+		}
+		for (uint32_t j = 0; j < limbs; j++) {
+			L1[size_t(i) * limbs + j] = l[j];
+			L2[size_t(i) * limbs + j] = r[j];
+		}
+	}
+}
+#endif
 
 template<const ConfigISD &isd, const ConfigSternMO &config>
 class SternMO : public ISDInstance<uint64_t, isd>{
@@ -75,6 +152,26 @@ public:
 	using NNElement = typename NN<nn_config>::Element;
 
 	size_t solutions[2*p] = {0};
+
+#ifdef USE_CUDA
+	// GPU: per ISD iteration in flight (2) a pinned copy of `HT` and `ws`
+	// (`size_HT` limbs) and of the permutation. `HT` and `ws` on the GPU.
+	constexpr static uint32_t nr_limbs = NN<nn_config>::ELEMENT_NR_LIMBS;
+	constexpr static size_t size_HT = (2 * kl_half + 1) * nr_limbs;
+	limb_type *hHT[2] = {nullptr, nullptr}, *dHT = nullptr;
+	uint32_t *hP[2] = {nullptr, nullptr};
+	cudaStream_t stream = nullptr;
+
+	~SternMO() noexcept {
+		// NOTE: no `checkCudaErrors`, it calls `exit`
+		for (uint32_t i = 0; i < 2; i++) {
+			if (hHT[i]) { cudaFreeHost(hHT[i]); }
+			if (hP[i]) { free(hP[i]); }
+		}
+		if (dHT) { cudaFree(dHT); }
+		if (stream) { cudaStreamDestroy(stream); }
+	}
+#endif
 
 	constexpr SternMO() noexcept {
 		nn_config.print();
@@ -209,6 +306,74 @@ public:
 	run() noexcept {
 		ISD::reset();
 
+#ifdef USE_CUDA
+		if constexpr (config.cuda) {
+			static_assert(isd.q == 2);
+			static_assert(sizeof(Label) == sizeof(NNElement));
+			algo.cuda_alloc();
+			if (dHT == nullptr) {
+				checkCudaErrors(cudaStreamCreate(&stream));
+				for (uint32_t i = 0; i < 2; i++) {
+					checkCudaErrors(cudaHostAlloc(&hHT[i], size_HT * sizeof(limb_type), cudaHostAllocDefault));
+					hP[i] = (uint32_t *)malloc(n * sizeof(uint32_t));
+				}
+				checkCudaErrors(cudaMalloc(&dHT, size_HT * sizeof(limb_type)));
+			}
+
+			// one ISD iteration on the CPU, `HT`, `ws` and `P` are saved in slot `s`
+			auto step = [&](const uint32_t s) {
+				ISD::step();
+				// NOTE: `std::`, `cryptanalysislib::memcpy` counts elements, not bytes
+				for (uint32_t i = 0; i < 2 * kl_half; i++) {
+					std::memcpy(hHT[s] + i * nr_limbs, HT[i], nr_limbs * sizeof(limb_type));
+				}
+				std::memcpy(hHT[s] + 2 * kl_half * nr_limbs, ws.ptr(), nr_limbs * sizeof(limb_type));
+				std::memcpy(hP[s], P.values, n * sizeof(uint32_t));
+			};
+
+			// builds the lists of slot `s` and runs the NN on them, async on the GPU
+			auto launch = [&](const uint32_t s) {
+				constexpr uint32_t threads = 256;
+				constexpr uint32_t blocks = (baselist_enumeration_size + threads - 1) / threads;
+				checkCudaErrors(cudaMemcpyAsync(dHT, hHT[s], size_HT * sizeof(limb_type), cudaMemcpyHostToDevice, stream));
+				sternmo_lists<limb_type, nr_limbs, kl_half, p><<<blocks, threads, 0, stream>>>
+					((limb_type *)algo.dL1, (limb_type *)algo.dL2, dHT, baselist_enumeration_size);
+				checkCudaErrors(cudaGetLastError());
+				algo.cuda_launch(baselist_enumeration_size, baselist_enumeration_size, stream);
+			};
+
+			uint32_t s = 0;
+			step(s);
+			launch(s);
+			while (true) {
+				// NOTE: the next iteration runs on the CPU, while the GPU computes the NN
+				const bool next = loops < isd.loops;
+				if (next) { step(s ^ 1u); }
+
+				algo.cuda_finish(stream);
+				if (algo.solutions_nr > 0) {
+					// restore the iteration of the solution
+					for (uint32_t i = 0; i < 2 * kl_half; i++) {
+						std::memcpy(HT[i], hHT[s] + i * nr_limbs, nr_limbs * sizeof(limb_type));
+					}
+					std::memcpy(ws.ptr(), hHT[s] + 2 * kl_half * nr_limbs, nr_limbs * sizeof(limb_type));
+					std::memcpy(P.values, hP[s], n * sizeof(uint32_t));
+					loops -= next;
+
+					solutions[0] = algo.solutions[0].first;
+					solutions[1] = algo.solutions[0].second;
+					not_found = false;
+					break;
+				}
+
+				if (!next) { break; }
+				s ^= 1u;
+				launch(s);
+			}
+		} else
+#else
+		static_assert(!config.cuda, "`cuda` needs `USE_CUDA`");
+#endif
 		while (not_found && loops < isd.loops) {
 			ISD::step();
 			construct_nearest_neighbour_lists();
