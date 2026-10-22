@@ -15,6 +15,7 @@ import random
 import sys
 import copy
 import json
+import tempfile
 try:
     from .challenge import parse_decodingchallenge, get_decodingchallenge
 except ImportError:  # executed as a script
@@ -39,7 +40,8 @@ algos = [
     {
         "name": "prange", 
         "description": "",
-        "config_name": "ConfigPrange",
+        # NOTE: no own config, `Prange<isdConfig>`
+        "config_name": None,
         "class_name": "Prange",
         "parameters": []
     },
@@ -48,8 +50,11 @@ algos = [
         "description": "",
         "config_name": "ConfigStern",
         "class_name": "Stern",
+        # NOTE: all members of the config, in their order. `default` is the C++
+        # default of the member (`main.h` initializes the config positionally)
         "parameters": [
-            { "fls": { "help": "final_list_size", "cpp": "final_list_size"}}, 
+            { "hm_bs": { "help": "bucketsize", "cpp": "HM_bucketsize", "default": "bc((k+l)/2, p) >> l"}},
+            { "fls": { "help": "final_list_size", "cpp": "final_list_size", "default": "1024"}},
         ]
     },
     {
@@ -79,11 +84,13 @@ algos = [
         "description": "",
         "config_name": "ConfigBJMM",
         "class_name": "BJMM",
+        # NOTE: all members of the config, in their order, see `stern`
         "parameters": [
-            { "l1": { "help": ""}}, 
-            { "hm1_bs": { "help": "bucketsize", "cpp": "HM1_bucketsize"}}, 
-            { "hm2_bs": { "help": "bucketsize", "cpp": "HM2_bucketsize"}}, 
-            { "fls": { "help": "final_list_size", "cpp": "final_list_size"}}, 
+            { "l1": { "help": "", "default": "0"}},
+            { "hm1_bs": { "help": "bucketsize", "cpp": "HM1_bucketsize", "default": "0"}},
+            { "hm2_bs": { "help": "bucketsize", "cpp": "HM2_bucketsize", "default": "0"}},
+            { "fls": { "help": "final_list_size", "cpp": "final_list_size", "default": "1024"}},
+            { "il": { "help": "intermediate loops", "cpp": "intermediate_loops", "default": "1"}},
         ]
     },
     {
@@ -200,14 +207,19 @@ class Problem:
     """
     This class is needed to abstract away the SD- and SDFq-Problem class
     """
-    def __init__(self, n: int, k: int, w: int, q: int):
+    def __init__(self, n: int, k: int, w: int, q: int, memory_bound: float = inf):
+        """
+        :param memory_bound: log2 of the maximal memory the optimizer may
+            choose, e.g. the time memory trade-off of BJMM
+        """
         self.n, self.k, self.w, self.q = n, k, w, q
+        self.memory_bound = memory_bound
 
     def to_sd(self) -> SDProblem:
-        return SDProblem(n=self.n, k=self.k, w=self.w)
+        return SDProblem(n=self.n, k=self.k, w=self.w, memory_bound=self.memory_bound)
 
     def to_sdfq(self) -> SDFqProblem:
-        return SDFqProblem(n=self.n, k=self.k, w=self.w, q=self.q)
+        return SDFqProblem(n=self.n, k=self.k, w=self.w, q=self.q, memory_bound=self.memory_bound)
 
 
 class Algorithm(Enum):
@@ -232,7 +244,8 @@ class Algorithms:
             elif self.__algorithm_number == Algorithm.stern:
                 self.p = SDDumer(problem.to_sd())
             elif self.__algorithm_number == Algorithm.bjmm:
-                self.p = SDBJMM(problem.to_sd()) # TODO her TMTO
+                # NOTE: `problem.memory_bound` selects the time memory trade-off
+                self.p = SDBJMM(problem.to_sd())
             else:
                 assert False
         if problem.q > 2:
@@ -298,8 +311,10 @@ class Decoding:
         """ 
         random.seed(seed)
 
-        # build 
-        self.tmp_project_dir = "/tmp/decoding"
+        # build
+        # NOTE: only the build dir is written (incl. `main.h`), the source
+        # dir may be read only
+        self.tmp_project_dir = os.path.join(tempfile.gettempdir(), "decoding")
         self.source_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
         self.algorithm = algorithm
@@ -356,7 +371,7 @@ class Decoding:
         # just a little helper flag to break the cycle like
         # `d.build().write_config().run()` if an error occurs.
         self.__successful_build = False
-        self.__config_file = os.path.join(self.source_dir, "main.h")
+        self.__config_file = os.path.join(self.tmp_project_dir, "main.h")
 
     def gen_random_instance(self):
         """ creates a random parity check matrix and the syndrome of a random
@@ -383,6 +398,7 @@ class Decoding:
             print("please generate the parameters first")
             return self
 
+        os.makedirs(self.tmp_project_dir, exist_ok=True)
         with open(self.__config_file, "w") as f:
             f.write("#include <cstdint>\n")
             f.write("""constexpr uint32_t n = {n};
@@ -398,25 +414,32 @@ constexpr uint32_t q = {q};
             for k, v in config.items():
                 f.write("constexpr uint32_t {k} = {v};\n".format(k=k, v=str(v)))
             
-            f.write("static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=q,.w=w,.p=p,.l=l,.c=c,.threads=t};\n")
+            # NOTE: e.g. prange has no `p` and `l`
+            f.write("static constexpr ConfigISD isdConfig{{.n=n,.k=k,.q=q,.w=w,.p={p},.l={l},.c={c},.threads={t}}};\n"
+                    .format(p=config.get("p", 0), l=config.get("l", 0),
+                            c=config.get("c", 0), t=config.get("t", 1)))
 
             assert self.__algorithm_description is not None
-            # NOTE: `{{`/`}}` are needed to emit literal braces with `format`
-            f.write("static constexpr {config_name} config{{isdConfig, "
-                    .format(config_name=self.__algorithm_description["config_name"]))
-            # every parameter is a dict with a single key: {"fls": {...}}
+            class_name = self.__algorithm_description["class_name"]
+            config_name = self.__algorithm_description["config_name"]
+            if config_name is None:
+                # NOTE: `main.cpp` allocates it on the heap, it is too large for the stack
+                f.write("using algorithm_type = {class_name}<isdConfig>;\n".format(class_name=class_name))
+                return self
+
+            # NOTE: positional, a base class cannot be designated and gcc
+            # rejects mixed positional and designated initializers
+            values = ["isdConfig"]
             for param in self.__algorithm_description["parameters"]:
                 k = next(iter(param))
-                if k in config:
-                    cpp_name = param[k].get("cpp", k)
-                    f.write(".{k}={v},".format(k=cpp_name, v=config[k]))
-            f.write("};\n")
+                values.append(str(config[k]) if k in config else param[k]["default"])
+            # NOTE: `{{`/`}}` are needed to emit literal braces with `format`
+            f.write("static constexpr {config_name} config{{{values}}};\n"
+                    .format(config_name=config_name, values=", ".join(values)))
 
-            f.write("""auto get_algorithm() noexcept {{
-    {class_name}<isdConfig, config> algo{{}};
-    return algo;
-}}
-""".format(class_name=self.__algorithm_description["class_name"]))
+            # NOTE: `main.cpp` allocates it on the heap, it is too large for the stack
+            f.write("using algorithm_type = {class_name}<isdConfig, config>;\n"
+                    .format(class_name=class_name))
 
         return self
 
@@ -426,8 +449,8 @@ constexpr uint32_t q = {q};
     
     def __create_build_env(self):
         """ runs `cmake -B` command.
-        TODO: should check if the current dir is writeable. if not move the whole
-        whing to a tmp dir
+        NOTE: only `self.tmp_project_dir` (in the temp dir) is written, hence
+        the source dir does not need to be writeable.
         """
         t = "Debug" if self.__debug else "Release"
         cmd = Decoding.cmake_executable + ["-B", self.tmp_project_dir, 
@@ -453,8 +476,13 @@ constexpr uint32_t q = {q};
             return {}
 
         for line in self.__run_output:
-            jj = json.loads(line)
-            j.update(jj)
+            # NOTE: e.g. the printed solution vector is not json
+            try:
+                jj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(jj, dict):
+                j.update(jj)
         return j
 
     def build(self, iters:int=1000):
@@ -509,7 +537,9 @@ constexpr uint32_t q = {q};
             opt = algorithm.optimize()
             self.__min_time = opt["time"]
             self.__min_params = opt["params"]
-            self.__min_params.update(extract_meta_params({})) # TODO
+            # NOTE: no meta params are given, but `main.h` needs `c` and `t`:
+            # same defaults as the cli, no markov chain and a single thread
+            self.__min_params.update({"c": 0, "t": 1})
             return self
 
         # run the practical optimizer
@@ -573,7 +603,8 @@ constexpr uint32_t q = {q};
             print("configuration was not successfully build. Not running")
             return self
 
-        cmd = [self.tmp_project_dir + "/main"] # TODO
+        # the `main` target of `CMakeLists.txt`, see `main.cpp`
+        cmd = [os.path.join(self.tmp_project_dir, "main")]
         p = Popen(cmd, stdin=PIPE, stdout=PIPE, stderr=STDOUT)
         out, _ = p.communicate()
 
@@ -618,6 +649,8 @@ if __name__ == "__main__":
     parser.add_argument('-k', help='code dimension', type=int)
     parser.add_argument('-w', help='code weight', type=int)
     parser.add_argument('-q', help='field size', default=2, type=int)
+    parser.add_argument('-m', '--memory_bound', help='log2 of the maximal memory, '
+                        'the optimizer chooses the time memory trade-off', default=inf, type=float)
 
     parser.add_argument('-l', help='', action=Range, type=str)
     parser.add_argument('-p', help='', action=Range, type=str)
@@ -657,7 +690,7 @@ if __name__ == "__main__":
     for a1 in add_args:
         a1(parser, args, a1.default, 'no string') # call action
 
-    problem = Problem(n=args.n, k=args.k, w=args.w, q=args.q)
+    problem = Problem(n=args.n, k=args.k, w=args.w, q=args.q, memory_bound=args.memory_bound)
 
     d = Decoding(Algorithm[args.algorithm], problem, 
                  meta_params=args.meta_params, 

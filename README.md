@@ -259,7 +259,27 @@ The following algorithms are currenlty implemented:
 --------------------
 
 ```bash 
-TODO image
+                         (k+l)/2         (k+l)/2
+                     ┌───────────────┬───────────────┐
+  e2:                │   weight p    │   weight p    │      4 base lists
+                     └───────────────┴───────────────┘
+       ┌──────┐   ┌──────┐                  ┌──────┐   ┌──────┐
+       │  L1  │   │  L2  │                  │  L3  │   │  L4  │
+       └──┬───┘   └──┬───┘                  └──┬───┘   └──┬───┘
+          │ on l1    │                         │ on l1    │
+       ┌──┴───┐      │                      ┌──┴───┐      │
+       │  HM  │◄─────┘                      │  HM  │◄─────┘
+       └──┬───┘                             └──┬───┘
+          │ weight 2p                          │ weight 2p, + s
+       ┌──┴───┐                             ┌──┴───┐
+       │ iL1  │  2p x uint16_t              │ iL2  │
+       └──┬───┘                             └──┬───┘
+          └──────────────────┬─────────────────┘
+              ┌──────────────┴──────────────┐
+              │ Indyk-Motwani, v times:     │
+              │  equal on l2 random coords  │
+              └──────────────┬──────────────┘
+                             │  wt <= w-4p ?
 ```
 - Lists `L1` and `L2` (`L3`, `L4`) are not computed. Instead `L1` is a hashmap on `l1` 
     coordinates. 
@@ -275,7 +295,28 @@ TODO image
 --------------------
 
 ```bash 
-TODO image
+                         (k+l)/2         (k+l)/2
+                     ┌───────────────┬───────────────┐
+  e2:                │   weight p    │   weight p    │      4 base lists
+                     └───────────────┴───────────────┘
+       ┌──────┐   ┌──────┐                  ┌──────┐   ┌──────┐
+       │  L1  │   │  L2  │                  │  L3  │   │  L4  │
+       └──┬───┘   └──┬───┘                  └──┬───┘   └──┬───┘
+          │ on l1    │                         │ on l1    │
+       ┌──┴───┐      │                      ┌──┴───┐      │
+       │  HM  │◄─────┘                      │  HM  │◄─────┘
+       └──┬───┘                             └──┬───┘
+          │ weight 2p                          │ weight 2p, + s
+       ┌──┴───┐                             ┌──┴───┐
+       │ iL1  │                             │ iL2  │
+       └──┬───┘                             └──┬───┘
+          └──────────────────┬─────────────────┘
+              ┌──────────────┴──────────────┐
+              │ Esser-Kübler-Z. NN:         │
+              │  r blocks, N tries, keep    │
+              │  pairs with dist <= dk      │
+              └──────────────┬──────────────┘
+                             │  wt <= w-4p ?
 ```
 
 - `L1` and `L2 
@@ -315,7 +356,21 @@ TODO image
 Apply the nearest neighbour strategy by Indyk-Motwani in the last level
 
 ```bash 
-TODO image
+                       k/2             k/2
+                 ┌───────────────┬───────────────┐
+  e2:            │   weight p    │   weight p    │
+                 └───────┬───────┴───────┬───────┘
+                         │               │
+                     ┌───┴───┐       ┌───┴───┐
+                     │  L1   │       │ L2 + s│   full n-k bit labels
+                     └───┬───┘       └───┬───┘
+                         └───────┬───────┘
+          ┌──────────────────────┴──────────────────────┐
+          │ Indyk-Motwani, v times: pick l2 coordinates, │
+          │ bucket L1 on them, search L2 in the buckets  │
+          └──────────────────────┬──────────────────────┘
+                                 │
+                          wt <= w-2p ?
 ```
 
 - Technically only `Dumers` algorithm is implemented.
@@ -327,10 +382,26 @@ Apply the nearest neighbour algorithm by [Esser-Kübler-Z.](https://arxiv.org/ab
 close elements in the last level.
 
 ```bash 
-TODO image
+                       k/2             k/2
+                 ┌───────────────┬───────────────┐
+  e2:            │   weight p    │   weight p    │
+                 └───────┬───────┴───────┬───────┘
+                         │               │
+                     ┌───┴───┐       ┌───┴───┐
+                     │  L1   │       │ L2 + s│   full n-k bit labels
+                     └───┬───┘       └───┬───┘
+                         └───────┬───────┘
+          ┌──────────────────────┴──────────────────────┐
+          │ Esser-Kübler-Z. NN on n-k bits: r blocks,   │
+          │ every block N random tries, keep the pairs  │
+          │ with weight <= dk on the block              │
+          └──────────────────────┬──────────────────────┘
+                                 │
+                          wt <= w-2p ?
 ```
 
 - Technically only `Dumers` algorithm is implemented.
+- source in `src/stern_mo.h` in class `SternMO`.
 
 
 `Pollard`:

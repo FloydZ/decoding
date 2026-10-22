@@ -52,7 +52,7 @@ public:
 		if constexpr (p == 0) {
 			for (uint32_t i = 0; i < n-k; ++i) {
 				const auto data = ws.get(i);
-				tmpe.set(data, 0, n-k-1-i);
+				tmpe.set(data, 0, i);
 			}
 		} else {
 			// assert(G.element1.label.popcnt() == (w-p));
@@ -65,7 +65,7 @@ public:
 			/// set e1 (get the label)
 			for (uint32_t i = 0; i < n-k; ++i) {
 				const auto data = tmp.get(i);
-				tmpe.set(data, 0, n-k-1-i);
+				tmpe.set(data, 0, i);
 			}
 
 			/// set e2 (get the value)
@@ -100,8 +100,8 @@ public:
 					break;
 				}
 			} else {
-				// TODO can be optimizes. Currently we need to swap because the syndrome is swapped to.
-				ISD::template step<true>();
+				// NOTE: no swap, `HT` and `ws` are both in the row order of `H`
+				ISD::template step<true, false>();
 				auto predicate = [&, this](const Label &in){
 					Label tmp;
 					Label::sub(tmp, ws, in);

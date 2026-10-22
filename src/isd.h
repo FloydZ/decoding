@@ -50,7 +50,7 @@ struct ConfigISD {
 
 	/// if true only the `packed` versions of the data containers are used
 	const bool packed = true;
-	const bool simd = false; // TODO enable
+	const bool simd = true;
 	const bool parity_row = false; // TODO
 	const bool doom = false; // TODO
 
@@ -402,7 +402,7 @@ public:
 
     /// one iteration: permute + gaus `wA`, then optionally
     /// \tparam sub extract `H` \tparam swap reverse its rows \tparam transpose into `HT`
-    /// NOTE: always extracts the syndrome `ws`
+    /// NOTE: always extracts the syndrome `ws`, in the same row order as `H`
 	template<const bool transpose=true,
 	         const bool swap=true,
 	         const bool sub=true>
@@ -438,7 +438,14 @@ public:
 			PCSubMatrix::transpose(HT, H);
 		}
 
-		extract_syndrome();
+		if constexpr (swap) {
+			extract_syndrome();
+		} else {
+			// NOTE: the rows of `H` are not swapped, hence neither is the syndrome
+			for (uint16_t i = 0; i < config.n-config.k; i++) {
+				ws.set(wA.get(i, config.n), i);
+			}
+		}
 		extract_cycles += cpucycles();
 
 		if (loops % config.print_loops == 0) {

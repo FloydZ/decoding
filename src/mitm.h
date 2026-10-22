@@ -676,8 +676,12 @@ public:
 
 	template<typename F>
 	bool step(const l_type iT, F &&f, const uint32_t tid = 0, const bool simd=true) {
-		/// TODO simd
-		(void)simd;
+		// NOTE: the SIMD version passes the rows as `uint32_t *`
+		if constexpr (std::is_invocable_v<F, l_type, l_type, uint32_t *, uint32_t *, uint32_t>) {
+			if (simd) {
+				return coll_hashmap_simple_simd(iT, tid, f);
+			}
+		}
 		return coll_hashmap_simple(iT, tid, f);
 	}
 
@@ -689,8 +693,8 @@ public:
 	/// \param f lambda function to execute for each collision
 	/// \return if found
 	template<typename F>
-	bool coll_hashmap_simple(const l_type iT, const uint32_t tid, F &&f) {
-		const size_t start = enumeration_size_per_thread * tid;
+	bool coll_hashmap_simple(const l_type iT, const uint32_t tid, F &&f, const size_t first = 0) {
+		const size_t start = std::max(first, enumeration_size_per_thread * tid);
 		const size_t end   = tid == threads-1 ? enumeration_size : enumeration_size_per_thread * (tid + 1);
 
 		alignas(32) uint16_t rows[4*p];
@@ -736,6 +740,140 @@ public:
 		return false;
 	}
 
+	/// computes the right list and searches for collisions in both hashmaps,
+	/// 8 elements of the right list at once.
+	/// NOTE: `f` gets the rows of `nr_cols` collisions: row s of collision c is
+	/// 	`index1[s*8 + c]` (`2p` rows of `hm2`) and `index2[s*8 + c]` (`p` rows
+	/// 	of `hm1`, then the `p` rows of the right list)
+	/// \param iT intermediate target
+	/// \param f lambda function to execute for each collision
+	/// \return if found
+	template<typename F>
+	bool coll_hashmap_simple_simd(const l_type iT, const uint32_t tid, F &&f) noexcept {
+		using HM1_DataType 			 = typename HashMap1::data_type;
+		using HM1_LoadType 			 = typename HashMap1::load_type;
+		using HM1_DataType_IndexType = typename HM1_DataType::index_type;
+		static_assert(sizeof(l_type) == 4);
+		static_assert(sizeof(HM1_DataType_IndexType) <= 4);
+		static_assert(sizeof(HM_DataType_IndexType) <= 4);
+		static_assert(sizeof(HM1_LoadType) <= 4);
+		static_assert(sizeof(HM_LoadType) <= 4);
+		static_assert(l1 < 32u);
+		constexpr uint32_t HM1_BUCKETSIZE = HashMap1::bucketsize;
+		constexpr uint32_t HM2_BUCKETSIZE = HashMap2::bucketsize;
+
+		const size_t start = enumeration_size_per_thread * tid;
+		const size_t end   = tid == threads-1 ? enumeration_size : enumeration_size_per_thread * (tid + 1);
+
+		alignas(32) uint32x8_t rows[p]{};
+		alignas(32) uint32x8_t right_index = uint32x8_t::setr(start+0, start+1, start+2, start+3, start+4, start+5, start+6, start+7);
+		const uint32x8_t eight = uint32x8_t::set1(8);
+		const uint32x8_t l1_mask = uint32x8_t::set1((1u << l1) - 1u);
+		const uint32x8_t l2_mask = uint32x8_t::set1(l2 >= 32u ? uint32_t(-1) : uint32_t((1u << l2) - 1u));
+		const uint32x8_t bucketsize1 = uint32x8_t::set1(HM1_BUCKETSIZE);
+		const uint32x8_t bucketsize2 = uint32x8_t::set1(HM2_BUCKETSIZE);
+		const uint32x8_t entry_size1 = uint32x8_t::set1(sizeof(HM1_DataType));
+		const uint32x8_t entry_size2 = uint32x8_t::set1(sizeof(HM_DataType));
+		const uint32x8_t right_offset = uint32x8_t::set1(n_half - config.epsilon);
+		const uint32x8_t index_mask1 = uint32x8_t::set1(sizeof(HM1_DataType_IndexType) == 4 ?
+		        uint32_t(-1) : uint32_t((1ull << (8*sizeof(HM1_DataType_IndexType))) - 1ull));
+		const uint32x8_t index_mask2 = uint32x8_t::set1(sizeof(HM_DataType_IndexType) == 4 ?
+		        uint32_t(-1) : uint32_t((1ull << (8*sizeof(HM_DataType_IndexType))) - 1ull));
+		// NOTE: the gather reads 4 bytes, the load is in the upper bytes
+		constexpr uint32_t load_shift1 = 4 - sizeof(HM1_LoadType);
+		constexpr uint32_t load_shift2 = 4 - sizeof(HM_LoadType);
+		const uint8_t *hm1_data = (const uint8_t *)hm1->ptr();
+		const uint8_t *hm2_data = (const uint8_t *)hm2->ptr();
+
+		// iterate the right list
+		size_t right_index_ = start;
+		for (; right_index_ + 8 <= end; right_index_ += 8) {
+			biject_simd<enumeration_length, p>(right_index, rows);
+			uint32x8_t tmp = uint32x8_t::set1(iT);
+
+			#pragma unroll
+			for (uint16_t j = 0; j < p; j++) {
+				tmp ^= uint32x8_t::template gather<4>(lHTr, rows[j]);
+			}
+
+			// first level: `hm1` hashes the lower `l1` bits
+			const uint32x8_t bucket1 = tmp & l1_mask;
+			const uint32x8_t load1 = uint32x8_t::template gather<sizeof(HM1_LoadType)>
+			        ((const uint8_t *)hm1->load_ptr() - load_shift1, bucket1) >> (8*load_shift1);
+			const uint32x8_t base1 = bucket1 * bucketsize1;
+
+			for (uint32_t j = 0; j < HM1_BUCKETSIZE; j++) {
+				const uint32x8_t j1 = uint32x8_t::set1(j);
+				const uint32_t mask1 = load1 > j1;
+
+				// early exit, if no collision was found
+				if (mask1 == 0) {
+					break;
+				}
+
+				const uint32x8_t offset1 = (base1 + j1) * entry_size1;
+				const uint32x8_t data1 = uint32x8_t::template gather<1>
+				        (hm1_data + offsetof(HM1_DataType, __data), offset1);
+				const uint32x8_t tmp2 = tmp ^ data1;
+
+				// second level: `hm2` hashes the next `l2` bits
+				const uint32x8_t bucket2 = (tmp2 >> l1) & l2_mask;
+				const uint32x8_t load2 = uint32x8_t::template gather<sizeof(HM_LoadType)>
+				        ((const uint8_t *)hm2->load_ptr() - load_shift2, bucket2) >> (8*load_shift2);
+				const uint32x8_t base2 = bucket2 * bucketsize2;
+
+				for (uint32_t v = 0; v < HM2_BUCKETSIZE; v++) {
+					const uint32x8_t v1 = uint32x8_t::set1(v);
+					const uint32_t mask2 = mask1 & uint32_t(load2 > v1);
+					if (mask2 == 0) {
+						break;
+					}
+
+					const uint32x8_t offset2 = (base2 + v1) * entry_size2;
+					const uint32x8_t shufmask = uint32x8_t::pack(mask2);
+					const uint32_t nr_cols = popcount::popcount(mask2);
+
+					alignas(32) uint32_t lt[8*2*p], rt[8*2*p];
+					#pragma unroll
+					for (uint32_t s = 0; s < 2*p; s++) {
+						const uint32x8_t index2 = uint32x8_t::template gather<1>
+						        (hm2_data + offsetof(HM_DataType, index) + s*sizeof(HM_DataType_IndexType), offset2) & index_mask2;
+						uint32x8_t::store(lt + 8*s, uint32x8_t::permute(index2, shufmask));
+					}
+
+					#pragma unroll
+					for (uint32_t s = 0; s < p; s++) {
+						const uint32x8_t index1 = uint32x8_t::template gather<1>
+						        (hm1_data + offsetof(HM1_DataType, index) + s*sizeof(HM1_DataType_IndexType), offset1) & index_mask1;
+						uint32x8_t::store(rt + 8*s,     uint32x8_t::permute(index1, shufmask));
+						uint32x8_t::store(rt + 8*(p+s), uint32x8_t::permute(rows[s] + right_offset, shufmask));
+					}
+
+					f(0, 0, lt, rt, nr_cols);
+				}
+			}
+
+			// prepare everything for the next iteration
+			right_index = right_index + eight;
+		}
+
+		// the remaining elements, with the same layout as above
+		coll_hashmap_simple(iT, tid, [&](const l_type a1, const l_type a2,
+		                                 const uint16_t *index1,
+		                                 const uint16_t *index2,
+		                                 const uint32_t nr_cols) {
+			(void)nr_cols;
+			alignas(32) uint32_t lt[8*2*p], rt[8*2*p];
+			for (uint32_t s = 0; s < 2*p; s++) {
+				lt[8*s] = index1[s];
+				rt[8*s] = index2[s];
+			}
+			f(a1, a2, lt, rt, 1);
+		}, right_index_);
+
+		return false;
+	}
+
 	constexpr void print() const noexcept{
 		hm1->info();
 		hm2->info();
@@ -777,78 +915,182 @@ class CollisionHashMapD {
 	const l_type *lHT, *lHTr;
 	std::tuple<HMs&...> hms;
 
-	alignas(32) std::array<l_type, 1u<<(d-1u)> iTs;
-	alignas(32) uint16_t rows[p*(1u << d)];
-	l_type sum = 0;
+	/// \return l_1 + ... + l_j, the bits matched up to level `j`
+	constexpr static uint32_t offset(const uint32_t j) noexcept {
+		uint32_t ret = 0;
+		for (uint32_t i = 0; i < j; i++) {
+			ret += config.ls[i];
+		}
+		return ret;
+	}
+	static_assert(offset(d) <= 8u*sizeof(l_type));
 public:
+	/// NOTE: the left base list must be in the first hashmap (on `l_1` bits),
+	/// 	see `EnumHashMap`. The hashmap `j` holds the left list of level `j-1`
+	/// 	(`2**(j-1) * p` rows) on the bits `[offset(j-1), offset(j))`.
 	CollisionHashMapD(const l_type *lHT,
 	                  HMs&...hms) noexcept :
-	    lHT(lHT), lHTr(lHT + enumeration_length), hms(hms...) {
+	    lHT(lHT), lHTr(lHT + enumeration_length), hms(hms...) {}
 
-		// TODO: `ls` only has `d` entries, but `2**(d-1) - 1` targets are drawn.
-		static_assert(((1u << (d - 1u)) - 1u) <= d, "not implemented for d > 3");
-		sum = 0;
-		for (uint32_t i = 0; i < ((1u<<(d-1u)) -1u); ++i) {
-			iTs[i] = rng() & ((1ul << config.ls[i]) - 1ul);
-			sum ^= iTs[i];
-		}
-		iTs[((1u<<(d-1u)) -1u)] = sum;
-
-	}
-
-	template<typename ...Fs>
-	bool step(const l_type iT, const uint32_t tid = 0, const bool simd=true, Fs& ...fs) {
-		(void)simd; // TODO simd
-		return coll_hashmap_simple(iT, tid, fs...);
-	}
-
-	/// computes the right list and start searching for collision
-	/// NOTE: without NN
-	/// NOTE: without AVX
-	/// \tparam F
-	/// \param iT intermediate target
-	/// \param f lambda function to execute for each collision
-	/// \return if found
-	template<typename ...Fs>
-	bool coll_hashmap_simple(const l_type iT, const uint32_t tid, Fs& ...fs) {
-		// const size_t start = enumeration_size_per_thread * tid;
-		// const size_t end   = tid == threads-1 ? enumeration_size : enumeration_size_per_thread * (tid + 1);
-
-		coll_hashmap_simple_level<d, Fs...>(iT, rows, tid, fs...);
+	/// computes the full tree and calls `f(value, rows)` for every element of
+	/// the root list: `value` is zero on the lower `offset(d)` bits, `rows` are
+	/// the `2**d * p` rows.
+	/// \param iT target of the root list, e.g. the syndrome
+	template<typename F>
+	bool step(const l_type iT, F &&f, const uint32_t tid = 0, const bool simd=true) {
+		coll_hashmap_simple_level<d>(iT, tid, simd, f);
 		return false;
 	}
 
-	template<const uint32_t dd, class ...Fs>
-	bool coll_hashmap_simple_level(const l_type data,
-	                               uint16_t *index,
-	                               const uint32_t tid, Fs& ...fs) {
-		// TODO not implemented yet
-		(void)tid;
-		((void)fs, ...);
+	/// generates all elements of a level `dd` list with the target `iT` and
+	/// calls `f(value, rows)` for each of them. `value` is the sum of the labels
+	/// and the target, it is zero on the lower `offset(dd)` bits.
+	/// NOTE: the left list of level `dd-1` is computed into the hashmap `dd`
+	/// 	with a random target, the right one is streamed with the remaining target.
+	template<const uint32_t dd, typename F>
+	void coll_hashmap_simple_level(const l_type iT, const uint32_t tid,
+	                               const bool simd, F &&f) noexcept {
+		static_assert((dd > 0) && (dd <= d));
 		if constexpr (dd == 1u) {
-			//f(data, index);
-			return false;
-		} else {
-			/// TODO iT und so
+			using HM = std::tuple_element_t<0, std::tuple<HMs...>>;
+			HM &hm = std::get<0>(hms);
 
-			// the min is needed to please the compiler. This is code is only executed if
-			// d - dd < d
-			constexpr uint32_t td = std::min(d - dd, d-1);
-			using HM = std::tuple_element_t<td, std::tuple<HMs...>>;
-			typename HM::load_type left_load;
-			HM &hm = std::get<td>(hms);
+			const size_t start = enumeration_size_per_thread * tid;
+			const size_t end   = tid == threads-1 ? enumeration_size : enumeration_size_per_thread * (tid + 1);
 
-			const size_t left_base = hm.find(data, left_load);
-			for (uint64_t v = left_base; v < left_base + left_load; v++) {
-				// const l_type tmp2 = data ^ hm.ptr(v).data();
-				for (uint32_t i = 0; i < 2; ++i) { // TODO not correct, need to be an iterator (for appending)
-					index[i] = hm.ptr(v).index[i];
+			// rows: `p` of the left list, then the `p` of the right list
+			alignas(32) uint16_t rows[2*p];
+			size_t right_index = start;
+			(void)simd;
+
+			// NOTE: `biject_simd` supports p <= 2
+			if constexpr ((sizeof(l_type) == 4) && (p <= 2)) { if (simd) {
+				using HM_DataType 			= typename HM::data_type;
+				using HM_LoadType 			= typename HM::load_type;
+				using HM_DataType_IndexType = typename HM_DataType::index_type;
+				static_assert(sizeof(HM_DataType_IndexType) <= 4);
+				static_assert(sizeof(HM_LoadType) <= 4);
+				static_assert(config.ls[0] < 32u);
+				constexpr uint32_t bucketsize = HM::bucketsize;
+
+				alignas(32) uint32x8_t rows8[p]{};
+				alignas(32) uint32x8_t right_index8 = uint32x8_t::setr(start+0, start+1, start+2, start+3, start+4, start+5, start+6, start+7);
+				const uint32x8_t eight = uint32x8_t::set1(8);
+				const uint32x8_t l1_mask = uint32x8_t::set1((1u << config.ls[0]) - 1u);
+				const uint32x8_t bucketsize8 = uint32x8_t::set1(bucketsize);
+				const uint32x8_t entry_size = uint32x8_t::set1(sizeof(HM_DataType));
+				const uint32x8_t index_mask = uint32x8_t::set1(sizeof(HM_DataType_IndexType) == 4 ?
+				        uint32_t(-1) : uint32_t((1ull << (8*sizeof(HM_DataType_IndexType))) - 1ull));
+				// NOTE: the gather reads 4 bytes, the load is in the upper bytes
+				constexpr uint32_t load_shift = 4 - sizeof(HM_LoadType);
+				const uint8_t *hm_data = (const uint8_t *)hm.ptr();
+
+				for (; right_index + 8 <= end; right_index += 8) {
+					biject_simd<enumeration_length, p>(right_index8, rows8);
+					uint32x8_t tmp = uint32x8_t::set1(iT);
+
+					#pragma unroll
+					for (uint16_t j = 0; j < p; j++) {
+						tmp ^= uint32x8_t::template gather<4>(lHTr, rows8[j]);
+					}
+
+					// the first hashmap hashes the lower `l_1` bits
+					const uint32x8_t bucket = tmp & l1_mask;
+					const uint32x8_t load = uint32x8_t::template gather<sizeof(HM_LoadType)>
+					        ((const uint8_t *)hm.load_ptr() - load_shift, bucket) >> (8*load_shift);
+					const uint32x8_t base = bucket * bucketsize8;
+
+					for (uint32_t v = 0; v < bucketsize; v++) {
+						const uint32x8_t v8 = uint32x8_t::set1(v);
+						uint32_t mask = load > v8;
+						if (mask == 0) {
+							break;
+						}
+
+						const uint32x8_t offset8 = (base + v8) * entry_size;
+						const uint32x8_t value = tmp ^ uint32x8_t::template gather<1>
+						        (hm_data + offsetof(HM_DataType, __data), offset8);
+						alignas(32) uint32x8_t left[p];
+						#pragma unroll
+						for (uint32_t s = 0; s < p; s++) {
+							left[s] = uint32x8_t::template gather<1>
+							        (hm_data + offsetof(HM_DataType, index) + s*sizeof(HM_DataType_IndexType), offset8) & index_mask;
+						}
+
+						// NOTE: every collision is passed on to the next level
+						while (mask) {
+							const uint32_t c = __builtin_ctz(mask);
+							mask &= mask - 1u;
+							for (uint32_t s = 0; s < p; s++) {
+								rows[s]     = left[s].v32[c];
+								rows[p + s] = rows8[s].v32[c] + enumeration_length;
+							}
+							f(l_type(value.v32[c]), rows);
+						}
+					}
+
+					right_index8 = right_index8 + eight;
+				}
+			}}
+
+			// the remaining elements, or all if not `simd`
+			for (; right_index < end; right_index++) {
+				biject<enumeration_length, p>(right_index, rows + p);
+				l_type tmp = iT;
+
+				#pragma unroll p
+				for (uint16_t j = 0; j < p; j++) {
+					rows[p + j] += enumeration_length;
+					tmp ^= lHT[rows[p + j]];
 				}
 
-				//coll_hashmap_simple_level<dd - 1u>(tmp2, index, tid, f);
+				typename HM::load_type load;
+				const size_t base = hm.find(tmp, load);
+				for (size_t v = base; v < base + load; v++) {
+					for (uint32_t i = 0; i < p; ++i) {
+						rows[i] = hm.ptr(v).index[i];
+					}
+					f(l_type(tmp ^ hm.ptr(v).data()), rows);
+				}
 			}
+		} else {
+			using HM = std::tuple_element_t<dd - 1u, std::tuple<HMs...>>;
+			HM &hm = std::get<dd - 1u>(hms);
 
-			return false;
+			// bits matched by the lower levels, and rows of a level `dd-1` element
+			constexpr uint32_t shift = offset(dd - 1u);
+			constexpr uint32_t nr_rows = (1u << (dd - 1u)) * p;
+			static_assert(shift < 8u*sizeof(l_type));
+
+			// the left list of level `dd-1` with a random target on the lower bits
+			const l_type iT_left = l_type(rng()) & l_type((l_type(1) << shift) - 1u);
+			hm.clear(tid);
+			coll_hashmap_simple_level<dd - 1u>(iT_left, tid, simd,
+			        [&](const l_type value, const uint16_t *rows) __attribute__((always_inline)) {
+				hm.insert(value >> shift, HM::data_type::create(value, rows));
+			});
+
+			// stream the right list of level `dd-1` and search in the left one
+			alignas(32) uint16_t rows[2*nr_rows];
+			coll_hashmap_simple_level<dd - 1u>(iT ^ iT_left, tid, simd,
+			        [&](const l_type value, const uint16_t *right) __attribute__((always_inline)) {
+				typename HM::load_type load;
+				const size_t base = hm.find(value >> shift, load);
+				if (load == 0) {
+					return;
+				}
+
+				for (uint32_t i = 0; i < nr_rows; ++i) {
+					rows[nr_rows + i] = right[i];
+				}
+
+				for (size_t v = base; v < base + load; v++) {
+					for (uint32_t i = 0; i < nr_rows; ++i) {
+						rows[i] = hm.ptr(v).index[i];
+					}
+					f(l_type(value ^ hm.ptr(v).data()), rows);
+				}
+			});
 		}
 	}
 
