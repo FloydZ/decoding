@@ -43,7 +43,7 @@ include(CheckLanguage) 			# needed for `check_language(CUDA)`
 # NOTE: cryptanalysislib is header only, hence it is not build (neither its
 # tests nor its benchmarks). Only its `src` directory is included below.
 
-include("${CMAKE_CURRENT_SOURCE_DIR}/deps/cryptanalysislib/deps/cmake_optimize_for_architecture/HostOptimizations.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/deps/cryptanalysislib/deps/cmake_optimize_for_architecture/host_optimizations.cmake")
 
 check_cxx_compiler_flag(-march=native COMPILER_SUPPORTS_MARCH_NATIVE)
 check_cxx_compiler_flag(-fno-inline COMPILER_SUPPORTS_NO_INLINE)
