@@ -78,7 +78,6 @@ public:
 
 		while (not_found && loops < isd.loops) {
 			const uint32_t tid = 0;
-			const bool simd = false;
 			ISD::step();
 			ISD::extract_pHT(pHT);
 

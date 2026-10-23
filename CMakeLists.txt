@@ -43,7 +43,9 @@ include(CheckLanguage) 			# needed for `check_language(CUDA)`
 # NOTE: cryptanalysislib is header only, hence it is not build (neither its
 # tests nor its benchmarks). Only its `src` directory is included below.
 
-include("${CMAKE_CURRENT_SOURCE_DIR}/deps/cryptanalysislib/deps/cmake_optimize_for_architecture/HostOptimizations.cmake")
+# NOTE: must be defined, otherwise no `-m<ext>`/`-DUSE_<EXT>` flags are added
+set(CMAKE_HOST_DO_NOT_ADD_TO_FLAGS OFF)
+include("${CMAKE_CURRENT_SOURCE_DIR}/deps/cryptanalysislib/deps/cmake_optimize_for_architecture/host_optimizations.cmake")
 
 check_cxx_compiler_flag(-march=native COMPILER_SUPPORTS_MARCH_NATIVE)
 check_cxx_compiler_flag(-fno-inline COMPILER_SUPPORTS_NO_INLINE)
@@ -247,10 +249,9 @@ include_directories("/usr/local/include")
 
 link_directories("/usr/local/lib")
 
-#TODO 
-# if (benchmark_FOUND)
-# 	add_subdirectory(bench)
-# endif()
+if (benchmark_FOUND)
+	add_subdirectory(bench)
+endif()
 if (GTest_FOUND)
 	add_subdirectory(tests)
 endif()
@@ -268,13 +269,19 @@ add_custom_target (
 
 
 # add the main target running our main algorithm
-#TODO add_executable(main main.cpp)
-# target_link_libraries(main ${LINK_TEST_FLAGS})
-
-# NOTE: there is currently no `main.cpp`. All targets below depend on it.
-if(NOT EXISTS ${CMAKE_SOURCE_DIR}/main.cpp)
+# NOTE: `main.h` is written by `decoding/optimize.py` into the build directory.
+# 	All `main*` targets below depend on it.
+set(MAIN_H ${CMAKE_BINARY_DIR}/main.h)
+if(EXISTS ${MAIN_H})
+	include_directories(${CMAKE_BINARY_DIR})
+	add_executable(main main.cpp)
+	target_link_libraries(main Threads::Threads OpenMP::OpenMP_CXX)
+	if(LINKER_SUPPORTS_ATOMIC)
+		target_link_libraries(main atomic)
+	endif()
+else()
 	if(USE_PROFILE OR USE_POLLY)
-		message(WARNING "USE_PROFILE/USE_POLLY need a `main.cpp`, which does not exist. Ignoring them.")
+		message(WARNING "USE_PROFILE/USE_POLLY need a `main.h`, see `decoding/optimize.py`. Ignoring them.")
 	endif()
 	set(USE_PROFILE OFF)
 	set(USE_POLLY OFF)
@@ -301,7 +308,7 @@ if(USE_PROFILE)
 endif()
 
 # NOTE: the compiler id is `Clang` (or `AppleClang`), never `clang`
-if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND EXISTS ${CMAKE_SOURCE_DIR}/main.cpp)
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND EXISTS ${MAIN_H})
     add_executable(main_PGO_instrumentation_first main.cpp)
     target_compile_options(main_PGO_instrumentation_first PUBLIC -fprofile-instr-generate -DUSE_LOOPS=2)
     target_link_libraries(main_PGO_instrumentation_first ${LINK_TEST_FLAGS} -fprofile-instr-generate)
