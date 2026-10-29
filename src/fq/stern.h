@@ -5,8 +5,8 @@
 #include "container/fq_vector.h"
 #include "matrix/matrix.h"
 #include "list/list.h"
-#include "sort.h"
-#include "popcount/popcount.h"
+#include "sort/sort.h"
+#include "algorithm/bits/popcount.h"
 #include "mitm.h"
 #include "isd.h"
 #include "../stern.h"
@@ -21,7 +21,7 @@ private:
 	constexpr static uint32_t k = isd.k;
 	constexpr static uint32_t w = isd.w;
 	constexpr static uint32_t q = isd.q;
-	constexpr static uint32_t qbits = bits_log2(q);
+	constexpr static uint32_t qbits = ceil_log2(q);
 
 	constexpr static uint32_t l = isd.l;
 	constexpr static uint32_t p = isd.p;
@@ -56,45 +56,13 @@ public:
 	Generator G;
 	List *L1, *L2;
 
-	/// compress in the case of non packed data containers
-	/// e.g. removes all the zeros from the containers
-	constexpr inline static __uint128_t Compress(const Label &label) noexcept {
-		/// some security measurements:
-		if constexpr (qbits*l > 128) {
-			ASSERT(false && "not implemented");
-		}
-
-		/// easy case
-		if constexpr (packed) {
-			constexpr __uint128_t mask = qbits*l == 128 ? __uint128_t(-1ull) : (__uint128_t(1ull) << (qbits*l)) - __uint128_t(1ull);
-			using TT = LogTypeTemplate<qbits*l>;
-
-			/// NOTE: that we fetch the first 128bits (and not the last, where we would assume
-			/// normally the l bit window), as we assume we swapped all rows within the parity
-			/// check matrix. Therefor the last `l` bit of every syndrome are now the first.
-			const TT a = *((TT *)label.ptr());
-			const __uint128_t aa = a;
-			return aa&mask;
-		}
-
-		// important to init with zero here.
-		__uint128_t ret = 0;
-
-		#pragma unroll
-		for (uint32_t i = 0u; i < l; ++i) {
-			ret ^= (label.get(i) << (qbits*i));
-		}
-
-		return ret;
-	}
-
 	/// this extractor is needed, to be able to search on the second
 	/// list for elements, which are equal zero summed together
 	/// \return the negative of label[lower, q*l*nr_window) shifted to zero
 	constexpr inline static __uint128_t NegateCompress(const Label &label) noexcept {
 		Label tmp = label;
 		tmp.neg();
-		return Compress(tmp);
+		return ISD::Compress(tmp);
 	}
 
 
@@ -115,11 +83,11 @@ public:
 		/// init lists
 		L1 = new List(list_size, threads);
 		L2 = new List(list_size, threads);
-		ASSERT((L1 != nullptr) && (L2 != nullptr));
+		assert((L1 != nullptr) && (L2 != nullptr));
 
 		///// init hashmap
 		hm = new HM;
-		ASSERT(hm != nullptr);
+		assert(hm != nullptr);
 	}
 
 	/// free all the memory
@@ -134,15 +102,15 @@ public:
 		hm->clear();
 
 		/// this call simply inits the the list
-		G.template run <HM, decltype(Compress), std::nullptr_t>
-				(L1, L2, enum_offset, 0, tid, hm, &Compress);
+		G.template run <HM, decltype(ISD::template Compress<l>), std::nullptr_t>
+				(L1, L2, enum_offset, 0, tid, hm, &ISD::template Compress<l>);
 	}
 
 	void find_collisions(const uint32_t tid) {
 		const size_t start = L2->start_pos(tid);
 		const size_t end = L2->end_pos(tid);
 
-		Label tmp;
+		Label tmp, tmp2;
 		for (size_t i = start; i < end; ++i) {
 			l_type data = NegateCompress(L2->at(i).label);
 			data = Label::template add_T<l_type>(data, syndrome);
@@ -150,12 +118,15 @@ public:
 			/// search in HM
 			HM_LoadType load;
 			IndexType pos = hm->find(data, load);
+			if (load == 0) {
+				continue;
+			}
+
+			Label::sub(tmp2, ws, L2->at(i).label);
 			for (uint64_t j = pos; j < pos + load; j++) {
 				const IndexType index = hm->ptr(j)[0];
 
-				/// TODO not really nice
-				Label::add(tmp, L1->at(index).label, L2->at(i).label);
-				Label::sub(tmp, ws, tmp);
+				Label::sub(tmp, tmp2, L1->at(index).label);
 
 				// std::cout << std::endl;
 				// L2->at(i).label.print();
@@ -166,7 +137,7 @@ public:
 
 				/// some debug checks
 				for (uint32_t s = 0; s < l; ++s) {
-					ASSERT(tmp.get(s) == 0);
+					assert(tmp.get(s) == 0);
 				}
 
 				/// if this checks passes we found a solution
@@ -191,10 +162,10 @@ public:
 		e.zero();
 
 		for (uint32_t i = 0; i < l; ++i) {
-			ASSERT(label_solution_to_recover.get(i) == 0);
+			assert(label_solution_to_recover.get(i) == 0);
 		}
-		ASSERT(label_solution_to_recover.popcnt() <= (w-2*p));
-		ASSERT(value_solution_to_recover.popcnt() == 2*p);
+		assert(label_solution_to_recover.popcnt() <= (w-2*p));
+		assert(value_solution_to_recover.popcnt() == 2*p);
 
 		for (uint32_t i = 0; i < n-k-l; ++i) {
 			tmpe.set(label_solution_to_recover.get(l + i), 0, (n-k-l) - i - 1);
@@ -204,7 +175,7 @@ public:
 			tmpe.set(value_solution_to_recover.get(i), 0, (n-k-l)+i);
 		}
 
-		ASSERT(tmpe.get(0).popcnt() <= w);
+		assert(tmpe.get(0).popcnt() <= w);
 
 		// apply back permutation
 		for (uint32_t i = 0; i < n; ++i) {
@@ -226,7 +197,7 @@ public:
 			{
 				const uint32_t tid = 0; //Thread::get_tid();
 				init_list(tid);
-				Thread::sync();
+				OMP_BARRIER
 				find_collisions(tid);
 			}
 		}

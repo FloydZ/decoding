@@ -30,6 +30,6 @@ TEST(Bjmm, t240) {
 int main(int argc, char **argv) {
 	InitGoogleTest(&argc, argv);
 	srand(time(NULL));
-	random_seed(rand());
+	rng_seed(rand());
 	return RUN_ALL_TESTS();
 }

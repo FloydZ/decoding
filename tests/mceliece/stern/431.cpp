@@ -57,22 +57,22 @@ TEST(SternIM, t431t1p2c20) {
 	EXPECT_EQ(stern.correct(), true);
 }
 
-// to small. bruteforcing finds to many solutions
-//TEST(SternMO, t431t1p2) {
-//	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=2,.l=19,.c=0,.threads=1};
-//	static constexpr ConfigSternMO config{isdConfig};
-//
-//	SternMO<isdConfig, config> stern{};
-//	stern.from_string(h, s);
-//	stern.run();
-//	EXPECT_EQ(stern.correct(), true);
-//}
+TEST(SternMO, t431t1p2) {
+	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=2,.l=0,.c=0,.threads=1};
+	// n-k = 86: r = 2 limbs of 43 bits
+	static constexpr ConfigSternMO config{isdConfig, 2, 50, 15, 43};
+
+	SternMO<isdConfig, config> stern{};
+	stern.from_string(h, s);
+	stern.run();
+	EXPECT_EQ(stern.correct(), true);
+}
 
 
 int main(int argc, char **argv) {
 	InitGoogleTest(&argc, argv);
 	ident();
 	srand(time(NULL));
-	random_seed(rand());
+	rng_seed(rand());
 	return RUN_ALL_TESTS();
 }

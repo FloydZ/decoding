@@ -38,7 +38,8 @@ TEST(Prange, q3t1p1c5) {
 }
 
 TEST(Prange, t1p1) {
-	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=q,.w=w-2,.p=1,.l=0,.c=0,.threads=1};
+	// NOTE: `w` is the planted weight, there is (whp.) no solution of weight `w-2`
+	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=q,.w=w,.p=1,.l=0,.c=0,.threads=1};
 
 	FqPrange<isdConfig> prange{};
 	prange.from_string(h, s);
@@ -57,6 +58,6 @@ TEST(Prange, t1p2) {
 int main(int argc, char **argv) {
 	InitGoogleTest(&argc, argv);
 	srand(time(NULL));
-	random_seed(rand());
+	rng_seed(rand());
 	return RUN_ALL_TESTS();
 }

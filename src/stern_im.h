@@ -17,7 +17,7 @@ public:
 #ifdef EXPECTED_PERMUTATIONS
 		return EXPECTED_PERMUTATIONS;
 #else
-		return 1; // TODO
+		return bc(n, w)/( nr_views * bc(n-k-l, w-2*p) * bc((k+l)/2, p) * bc((k+l)/2, p));
 #endif
 	}
 
@@ -62,7 +62,7 @@ public:
 		    (void)a1;
 		    (void)a2;
 			// const l_type a = a1 ^ a2;
-			ASSERT(bEnum->check_hashmap2(syndrome, index1, 2u*config.p, isd.l));
+			assert(bEnum->check_hashmap2(syndrome, index1, 2u*config.p, isd.l));
 
 		    for (uint32_t i = 0; i < config.p; i++) {
 				final_list_left[final_list_current_size][i]  = index1[i];
@@ -78,7 +78,6 @@ public:
 
 		while (not_found && loops < isd.loops) {
 			const uint32_t tid = 0;
-			const bool simd = false;
 			ISD::step();
 			ISD::extract_pHT(pHT);
 
