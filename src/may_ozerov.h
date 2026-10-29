@@ -232,6 +232,10 @@ public:
 
 	// runs the tree and the NN on the GPU, needs a CUDA compiler
 	const bool cuda = false;
+	// GPU: flat NN tree (`nn_flat_level` in nn/nn.cuh, `r` levels, `N` <= 64)
+	// instead of the recursive one; the NN runs as a CUDA graph without a
+	// host sync after the merge. mce1284 p=2 l=16: r=2 N=64 dk=4 nnk=16
+	const bool cuda_flat = false;
 
 	/// expected number of permutations (ignores the representations)
 	[[nodiscard]] consteval uint64_t compute_loops() const noexcept {
@@ -252,6 +256,7 @@ public:
 		          << ", \"bf\": " << bf
 		          << ", \"intermediate_loops\": " << intermediate_loops
 		          << ", \"cuda\": " << cuda
+		          << ", \"cuda_flat\": " << cuda_flat
 		          << " }" << std::endl;
 	}
 };
@@ -294,11 +299,13 @@ public:
 
 	constexpr static NN_Config nn_config{
 		n-k-l, config.r, config.N, config.nnk,
-		LIST_SIZE, config.dk, w-(4*p), 0, config.bf};
+		LIST_SIZE, config.dk, w-(4*p), 0, config.bf,
+		0, 0, false, config.cuda_flat};
 	NN<nn_config> algo {};
 	using NNElement = typename NN<nn_config>::Element;
 	static_assert(NR_LIMBS == NN<nn_config>::ELEMENT_NR_LIMBS);
-	static_assert(config.r <= NR_LIMBS);
+	// NOTE: the flat tree filters on 32 bit limbs if `nnk` <= 32 and checks its limbs itself
+	static_assert(config.cuda_flat || (config.r <= NR_LIMBS));
 
 	// simd type of an element: `NR_LIMBS` limbs, 3 are padded to 4
 	constexpr static uint32_t VL = NR_LIMBS == 3 ? 4 : NR_LIMBS;
@@ -333,16 +340,20 @@ public:
 	limb_type *hRows[2] = {nullptr, nullptr}, *hHT[2] = {nullptr, nullptr};
 	uint32_t *hP[2] = {nullptr, nullptr};
 	limb_type hSyn[2] = {0, 0};
-	// pinned: sizes of the level-1 lists and the solution elements
+	// pinned: sizes of the level-1 lists, the solution elements and positions
+	// (`cuda_flat`: per NN in flight, 2)
 	uint32_t *hE = nullptr;
-	limb_type *hSol = nullptr;
+	limb_type *hSol[2] = {nullptr, nullptr};
+	size_t *hF[2] = {nullptr, nullptr};
+	// `cuda_flat`: the NN + solution copy of flight `f` as a graph
+	cudaGraphExec_t graph[2] = {nullptr, nullptr};
 	// device: split rows, base lists, keys, bucket counts/offsets/cursors, sizes, solution, scan tile sums
 	constexpr static uint32_t scan_tiles = (nr_buckets + 1u + MO_SCAN_TILE - 1u) / MO_SCAN_TILE;
 	limb_type *dRows = nullptr, *dBL = nullptr, *dBR = nullptr, *dSol = nullptr;
 	uint32_t *dKL = nullptr, *dKR = nullptr, *dCnt = nullptr, *dOff = nullptr, *dCur = nullptr, *dE = nullptr;
 	uint32_t *dSums = nullptr;
 	cudaStream_t stream = nullptr;
-	cudaEvent_t ev_merge = nullptr, ev_nn = nullptr;
+	cudaEvent_t ev_merge = nullptr, ev_nn[2] = {nullptr, nullptr};
 #endif
 
 	/// allocates the base and level-1 lists
@@ -387,13 +398,17 @@ public:
 			free(hP[i]);
 		}
 		if (hE) { cudaFreeHost(hE); }
-		if (hSol) { cudaFreeHost(hSol); }
+		for (uint32_t i = 0; i < 2; i++) {
+			if (hSol[i]) { cudaFreeHost(hSol[i]); }
+			if (hF[i]) { cudaFreeHost(hF[i]); }
+			if (graph[i]) { cudaGraphExecDestroy(graph[i]); }
+			if (ev_nn[i]) { cudaEventDestroy(ev_nn[i]); }
+		}
 		for (void *ptr : {(void *)dRows, (void *)dBL, (void *)dBR, (void *)dSol, (void *)dKL, (void *)dKR,
 		                  (void *)dCnt, (void *)dOff, (void *)dCur, (void *)dE, (void *)dSums}) {
 			if (ptr) { cudaFree(ptr); }
 		}
 		if (ev_merge) { cudaEventDestroy(ev_merge); }
-		if (ev_nn) { cudaEventDestroy(ev_nn); }
 		if (stream) { cudaStreamDestroy(stream); }
 #endif
 	}
@@ -606,14 +621,15 @@ public:
 
 		checkCudaErrors(cudaStreamCreate(&stream));
 		checkCudaErrors(cudaEventCreateWithFlags(&ev_merge, cudaEventDisableTiming));
-		checkCudaErrors(cudaEventCreateWithFlags(&ev_nn, cudaEventDisableTiming));
 		for (uint32_t i = 0; i < 2; i++) {
+			checkCudaErrors(cudaEventCreateWithFlags(&ev_nn[i], cudaEventDisableTiming));
 			checkCudaErrors(cudaHostAlloc(&hRows[i], size_rows * sizeof(limb_type), cudaHostAllocDefault));
 			hHT[i] = (limb_type *)malloc(size_HT * sizeof(limb_type));
 			hP[i] = (uint32_t *)malloc(n * sizeof(uint32_t));
+			checkCudaErrors(cudaHostAlloc(&hSol[i], 2 * NR_LIMBS * sizeof(limb_type), cudaHostAllocDefault));
+			checkCudaErrors(cudaHostAlloc(&hF[i], 2 * sizeof(size_t), cudaHostAllocDefault));
 		}
 		checkCudaErrors(cudaHostAlloc(&hE, 2 * sizeof(uint32_t), cudaHostAllocDefault));
-		checkCudaErrors(cudaHostAlloc(&hSol, 2 * NR_LIMBS * sizeof(limb_type), cudaHostAllocDefault));
 
 		checkCudaErrors(cudaMalloc(&dRows, size_rows * sizeof(limb_type)));
 		checkCudaErrors(cudaMalloc(&dBL, B * NR_LIMBS * sizeof(limb_type)));
@@ -626,6 +642,8 @@ public:
 		checkCudaErrors(cudaMalloc(&dCur, nr_buckets * sizeof(uint32_t)));
 		checkCudaErrors(cudaMalloc(&dE, 2 * sizeof(uint32_t)));
 		checkCudaErrors(cudaMalloc(&dSums, scan_tiles * sizeof(uint32_t)));
+		// NOTE: the flat NN reads the list sizes written by `mo_merge` on the device
+		if constexpr (config.cuda_flat) { algo.dSizes = dE; }
 	}
 
 	/// one ISD iteration: split rows into slot `s`, saves `HT`, `ws`, `P`, `syndrome`
@@ -685,19 +703,116 @@ public:
 		checkCudaErrors(cudaEventRecord(ev_merge, stream));
 	}
 
-	/// NN on the level-1 lists, async; solution in `algo.hf`, its elements in `hSol` after `ev_nn`
+	/// NN on the level-1 lists, async; solution in `algo.hf`, its elements in `hSol[0]` after `ev_nn[0]`
 	void cuda_nn(const uint32_t e1, const uint32_t e2) noexcept {
 		algo.cuda_launch(e1, e2, stream);
 		mo_solution<limb_type, NR_LIMBS><<<1, 32, 0, stream>>>
 			(dSol, (const limb_type *)algo.dL1, (const limb_type *)algo.dL2, algo.df, algo.df + 1);
 		checkCudaErrors(cudaGetLastError());
-		checkCudaErrors(cudaMemcpyAsync(hSol, dSol, 2 * NR_LIMBS * sizeof(limb_type), cudaMemcpyDeviceToHost, stream));
-		checkCudaErrors(cudaEventRecord(ev_nn, stream));
+		checkCudaErrors(cudaMemcpyAsync(hSol[0], dSol, 2 * NR_LIMBS * sizeof(limb_type), cudaMemcpyDeviceToHost, stream));
+		checkCudaErrors(cudaEventRecord(ev_nn[0], stream));
+	}
+
+	/// `cuda_flat`: NN on the level-1 lists (sizes read from `dE` on the
+	/// device) + solution copy into `hF[f]`, `hSol[f]`, as one graph per flight
+	/// `f`, captured on the first use. `ev_nn[f]` follows it.
+	void cuda_nn_flat(const uint32_t f) noexcept {
+		if (graph[f] == nullptr) {
+			cudaGraph_t g;
+			checkCudaErrors(cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal));
+			algo.cuda_launch(LIST_SIZE, LIST_SIZE, stream);
+			mo_solution<limb_type, NR_LIMBS><<<1, 32, 0, stream>>>
+				(dSol, (const limb_type *)algo.dL1, (const limb_type *)algo.dL2, algo.df, algo.df + 1);
+			checkCudaErrors(cudaGetLastError());
+			checkCudaErrors(cudaMemcpyAsync(hSol[f], dSol, 2 * NR_LIMBS * sizeof(limb_type), cudaMemcpyDeviceToHost, stream));
+			checkCudaErrors(cudaMemcpyAsync(hF[f], algo.df, 2 * sizeof(size_t), cudaMemcpyDeviceToHost, stream));
+			checkCudaErrors(cudaStreamEndCapture(stream, &g));
+			checkCudaErrors(cudaGraphInstantiate(&graph[f], g, 0));
+			checkCudaErrors(cudaGraphDestroy(g));
+		}
+		checkCudaErrors(cudaGraphLaunch(graph[f], stream));
+		checkCudaErrors(cudaEventRecord(ev_nn[f], stream));
+	}
+
+	/// `cuda_flat` GPU loop of `run`: tree, merge and NN of an iteration are
+	/// queued without any host sync (the NN reads the list sizes on the
+	/// device); the next merge + NN (or permutation + tree + merge + NN) is
+	/// queued before the host waits for the current NN, so the GPU never idles
+	/// and the CPU Gauss overlaps. NN results alternate between the flights 0/1.
+	void run_cuda_flat() noexcept {
+		cuda_alloc();
+		auto next_target = [this](uint32_t t, const uint32_t s) {
+			while ((t ^ uint32_t(hSyn[s])) < t) { t++; }
+			assert(t < nr_buckets);
+			return t;
+		};
+
+		uint32_t s = 0, il = 0, f = 0;
+		cuda_step(s);
+		cuda_tree(s);
+		uint32_t t = next_target(0, s);
+		cuda_merge(s, t);
+		cuda_nn_flat(f);
+		while (true) {
+			// queue the next work behind the current NN
+			uint32_t ns = s, nt = 0, nil = il + 1u;
+			bool next = true;
+			if (nil < config.intermediate_loops) {
+				nt = next_target(t + 1u, s);
+				cuda_merge(s, nt);
+				cuda_nn_flat(f ^ 1u);
+			} else {
+				next = loops < isd.loops;
+				if (next) {
+					ns = s ^ 1u;
+					nil = 0;
+					cuda_step(ns);
+					cuda_tree(ns);
+					nt = next_target(0, ns);
+					cuda_merge(ns, nt);
+					cuda_nn_flat(f ^ 1u);
+				}
+			}
+
+			checkCudaErrors(cudaEventSynchronize(ev_nn[f]));
+			if (hF[f][0] != size_t(-1)) {
+				// restore the iteration of the solution
+				cuda_restore(s);
+				loops -= (ns != s);
+				target = t;
+				not_found = false;
+				break;
+			}
+
+			if (!next) { break; }
+			s = ns; t = nt; il = nil; f ^= 1u;
+		}
+
+		checkCudaErrors(cudaStreamSynchronize(stream));
+		if (!not_found) {
+			reconstruct(hSol[f], hSol[f] + NR_LIMBS);
+		}
+	}
+
+	/// Monte Carlo estimate of the success probability of one NN run on
+	/// level-1 lists of the expected size `E` (`cuda` only), see
+	/// `NN::cuda_success_probability`. Overwrites the GPU lists.
+	double nn_success_probability(const uint32_t instances, const uint32_t per) noexcept {
+		if constexpr (config.cuda) {
+			cuda_alloc();
+			return algo.cuda_success_probability(E, n - k - l, instances, per, stream);
+		} else {
+			return -1.;
+		}
 	}
 
 	/// GPU loop of `run`: the CPU computes the next permutation while the GPU runs the current one
 	void run_cuda() noexcept {
 		static_assert(sizeof(limb_type) == sizeof(typename NN<nn_config>::Element) / NR_LIMBS);
+		if constexpr (config.cuda_flat) {
+			run_cuda_flat();
+			return;
+		}
 		cuda_alloc();
 
 		// first target of slot `s` >= `t`, see `step`
@@ -739,7 +854,7 @@ public:
 			}
 
 			if (nn) {
-				checkCudaErrors(cudaEventSynchronize(ev_nn));
+				checkCudaErrors(cudaEventSynchronize(ev_nn[0]));
 				if (algo.hf[0] != size_t(-1)) {
 					// restore the iteration of the solution
 					cuda_restore(s);
@@ -756,7 +871,7 @@ public:
 
 		checkCudaErrors(cudaStreamSynchronize(stream));
 		if (!not_found) {
-			reconstruct(hSol, hSol + NR_LIMBS);
+			reconstruct(hSol[0], hSol[0] + NR_LIMBS);
 		}
 	}
 #endif

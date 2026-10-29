@@ -19,6 +19,10 @@ public:
 	const bool enforce_bf = false;
 	// runs the NN step on the GPU, needs a CUDA compiler
 	const bool cuda = false;
+	// GPU: flat tree (`r` levels, `N` <= 64) instead of the recursive
+	// one, see `nn_flat_level` in nn/nn.cuh. mce1284 p=2: r=2 N=64 dk=4 nnk=16
+	// (RTX 5090: 131 us/iter, P = 0.63, vs 339 us/iter, P = 0.31 recursive)
+	const bool cuda_flat = false;
 	[[nodiscard]] consteval uint64_t compute_loops() const noexcept {
 #ifdef EXPECTED_PERMUTATIONS
 		return EXPECTED_PERMUTATIONS;
@@ -35,6 +39,7 @@ public:
 				  << ", \"dk\": " << dk
 				  << ", \"nnk\": " << nnk
 				  << ", \"cuda\": " << cuda
+				  << ", \"cuda_flat\": " << cuda_flat
 				  << " }" << std::endl;
 	}
 };
@@ -147,7 +152,8 @@ public:
 
 	constexpr static NN_Config nn_config{
 	        n-k, config.r, config.N, config.nnk,
-	        baselist_enumeration_size, config.dk, w-(2*p), 0, 1024};
+	        baselist_enumeration_size, config.dk, w-(2*p), 0, 1024,
+	        0, 0, false, config.cuda_flat};
 	NN<nn_config> algo {};
 	using NNElement = typename NN<nn_config>::Element;
 
@@ -161,12 +167,15 @@ public:
 	limb_type *hHT[2] = {nullptr, nullptr}, *dHT = nullptr;
 	uint32_t *hP[2] = {nullptr, nullptr};
 	cudaStream_t stream = nullptr;
+	// `cuda_flat`: the GPU work of one iteration per slot as a CUDA graph
+	cudaGraphExec_t graph[2] = {nullptr, nullptr};
 
 	~SternMO() noexcept {
 		// NOTE: no `checkCudaErrors`, it calls `exit`
 		for (uint32_t i = 0; i < 2; i++) {
 			if (hHT[i]) { cudaFreeHost(hHT[i]); }
 			if (hP[i]) { free(hP[i]); }
+			if (graph[i]) { cudaGraphExecDestroy(graph[i]); }
 		}
 		if (dHT) { cudaFree(dHT); }
 		if (stream) { cudaStreamDestroy(stream); }
@@ -301,6 +310,19 @@ public:
 		}
 	}
 
+#ifdef USE_CUDA
+	/// Monte Carlo estimate of the success probability of one NN iteration
+	/// (`cuda` only), see `NN::cuda_success_probability`. Overwrites the GPU lists.
+	double nn_success_probability(const uint32_t instances, const uint32_t per) noexcept {
+		if constexpr (config.cuda) {
+			if (stream == nullptr) { checkCudaErrors(cudaStreamCreate(&stream)); }
+			return algo.cuda_success_probability(baselist_enumeration_size, n - k, instances, per, stream);
+		} else {
+			return -1.;
+		}
+	}
+#endif
+
 	/// runs the May-Ozerov Stern versions
 	uint64_t __attribute__ ((noinline))
 	run() noexcept {
@@ -332,7 +354,7 @@ public:
 			};
 
 			// builds the lists of slot `s` and runs the NN on them, async on the GPU
-			auto launch = [&](const uint32_t s) {
+			auto enqueue = [&](const uint32_t s) {
 				constexpr uint32_t threads = 256;
 				constexpr uint32_t blocks = (baselist_enumeration_size + threads - 1) / threads;
 				checkCudaErrors(cudaMemcpyAsync(dHT, hHT[s], size_HT * sizeof(limb_type), cudaMemcpyHostToDevice, stream));
@@ -340,6 +362,24 @@ public:
 					((limb_type *)algo.dL1, (limb_type *)algo.dL2, dHT, baselist_enumeration_size);
 				checkCudaErrors(cudaGetLastError());
 				algo.cuda_launch(baselist_enumeration_size, baselist_enumeration_size, stream);
+			};
+			// NOTE: `cuda_flat`: the ~10 launches per iteration cost ~40 us of
+			// 	CPU time, as one graph per slot ~5 us. The recursive tree draws
+			// 	its seed on the host per launch, hence it is not captured.
+			auto launch = [&](const uint32_t s) {
+				if constexpr (config.cuda_flat) {
+					if (graph[s] == nullptr) {
+						cudaGraph_t g;
+						checkCudaErrors(cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal));
+						enqueue(s);
+						checkCudaErrors(cudaStreamEndCapture(stream, &g));
+						checkCudaErrors(cudaGraphInstantiate(&graph[s], g, 0));
+						checkCudaErrors(cudaGraphDestroy(g));
+					}
+					checkCudaErrors(cudaGraphLaunch(graph[s], stream));
+				} else {
+					enqueue(s);
+				}
 			};
 
 			uint32_t s = 0;

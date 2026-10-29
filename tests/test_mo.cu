@@ -105,6 +105,30 @@ TEST(SternMO, t431_cuda) {
 	EXPECT_EQ(stern.correct(), true);
 }
 
+// same as `t100_cuda`, but with the flat two level tree (32 bit windows)
+TEST(SternMO, t100_cuda_flat) {
+	using namespace c100;
+	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=1,.l=0,.c=0,.threads=1};
+	static constexpr ConfigSternMO config{isdConfig, 2, 50, 11, 32, false, true, true};
+
+	SternMO<isdConfig, config> stern{};
+	stern.from_string(h, s);
+	stern.run();
+	EXPECT_EQ(stern.correct(), true);
+}
+
+// same as `t431_cuda`, but with the flat two level tree
+TEST(SternMO, t431_cuda_flat) {
+	using namespace c431;
+	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=2,.l=0,.c=0,.threads=1};
+	static constexpr ConfigSternMO config{isdConfig, 2, 50, 11, 32, false, true, true};
+
+	SternMO<isdConfig, config> stern{};
+	stern.from_string(h, s);
+	stern.run();
+	EXPECT_EQ(stern.correct(), true);
+}
+
 // same as `t431_cuda`, but with p = 3
 TEST(SternMO, t431p3_cuda) {
 	using namespace c431;

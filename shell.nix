@@ -1,16 +1,70 @@
 with import <nixpkgs> {};
-let
-  mach-nix = import (builtins.fetchGit {
-    url = "https://github.com/DavHau/mach-nix";
-    ref = "refs/tags/3.5.0";
-  }) {};
-  pyEnv = mach-nix.mkPython rec {
-    providers._default = "wheel,conda,nixpkgs,sdist";
-    requirements = builtins.readFile ./requirements.txt;
-  };
-in
-{ pkgs ? import <nixpkgs> {} }:
 let 
+  unstable_pkgs = import <nixos-unstable> {};
+  bInputs = [ 
+    # C++ stuff 
+    cmake 
+    gnumake 
+    mpfr
+    clang-tools
+    clang 
+    llvm
+    libllvm     # needed for apple
+    gnum4
+    flint
+    gmp
+    gnuplot
+    git
+
+    # just for python 
+    python3
+    python3Packages.sympy
+    python3Packages.numpy
+    python3Packages.setuptools
+    python3Packages.virtualenv
+    python3Packages.pylint
+    python3Packages.matplotlib
+
+    # needed for debugging
+    lldb
+  ] ++ (lib.optionals pkgs.stdenv.isLinux ([
+    gdb
+    rr
+    perf
+
+    cudaPackages.cuda_cudart
+    cudaPackages.cuda_nvcc
+    cudaPackages.cuda_cccl
+    cudaPackages.cuda_gdb
+    cudaPackages.cuda_cupti
+    cudaPackages.nsight_compute
+    cudaPackages.libcurand
+    linuxPackages.nvidia_x11
+
+    # Other development tools
+    ruff 
+    gcc
+    gdb
+    cmake
+    gnumake
+    ninja
+    clang-tools
+    valgrind
+    pkg-config
+    binutils
+    elfutils        # needed for tracy
+  ]));
+
+
+    ## Path setup
+    #export PATH="${pkgs.gcc}/bin:$PATH"
+    #export PATH=${pkgs.cudaPackages.cuda_nvcc}/bin:$PATH
+
+    ## CUDA setup
+    #export CUDAHOSTCXX="${pkgs.gcc}/bin/g++"
+    #export CUDA_HOST_COMPILER="${pkgs.gcc}/bin/gcc"
+    #export CUDA_HOME=${pkgs.cudaPackages.cuda_cudart}
+    #export CUDA_PATH=${pkgs.cudaPackages.cuda_cudart}
   b = ''
     # NVIDIA Driver and CUDA setup
     export NVIDIA_VISIBLE_DEVICES=all
@@ -35,42 +89,26 @@ let
     nvcc --version
   '';
 in
+{ pkgs ? import <nixpkgs> {} }:
+
 stdenv.mkDerivation {
-  name = "decoding";
+  name = "rust_lll";
   src = ./.;
 
-  buildInputs = [
-    pyenv
-    gtest
-    gbenchmark 
-    git 
-    cmake
-    clang
-    clang-tools
-    llvmPackages.openmp
-    llvm
-    gcc
-  ]++ (lib.optionals pkgs.stdenv.isLinux ([
-    flamegraph
-    gdb
-    perf
-    pprof
-    valgrind
+  buildInputs = bInputs; 
+  # RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
+  #export "LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${lib.makeLibraryPath bInputs}"
 
-    # cuda
-    cudaPackages.cuda_cudart
-    cudaPackages.cuda_nvcc
-    cudaPackages.cuda_cccl
-    cudaPackages.cuda_gdb
-    cudaPackages.cuda_cupti
-    cudaPackages.nsight_compute
-    cudaPackages.nsight_systems 
-    cudaPackages.libcurand
-    linuxPackages.nvidia_x11
-  ]));
   shellHook = ''
     export NIX_ENFORCE_NO_NATIVE=0
     export NIX_HARDENING_ENABLE=0
-  ''  + pkgs.lib.optionalString pkgs.stdenv.isLinux b; 
+
+    SOURCE_DATE_EPOCH=$(date +%s)
+    VENV=.venv
+    if test ! -d $VENV; then
+      virtualenv $VENV
+    fi
+    source ./$VENV/bin/activate
+  '' + pkgs.lib.optionalString pkgs.stdenv.isLinux b;
 }
 

@@ -169,6 +169,43 @@ TEST(MayOzerov, t100p3_cuda) {
 	EXPECT_EQ(mo.correct(), true);
 }
 
+// same as `t431p1_cuda`, but with the flat NN tree (graph, no merge sync).
+// NOTE: the flat tree never bruteforces small nodes, hence N = 50 for lists of ~1900
+TEST(MayOzerov, t431p1_cuda_flat) {
+	using namespace c431;
+	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=1,.l=4,.c=0,.threads=1};
+	static constexpr ConfigMayOzerov config{isdConfig, 2, 50, 12, 32, 256, 4, false, true, true};
+
+	MayOzerov<isdConfig, config> mo{};
+	mo.from_string(h, s);
+	mo.run();
+	EXPECT_EQ(mo.correct(), true);
+}
+
+// same as `t100p2_cuda`, but with the flat NN tree (2 levels)
+TEST(MayOzerov, t100p2_cuda_flat) {
+	using namespace c100;
+	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=2,.l=8,.c=0,.threads=1};
+	static constexpr ConfigMayOzerov config{isdConfig, 2, 10, 5, 16, 1024, 8, false, true, true};
+
+	MayOzerov<isdConfig, config> mo{};
+	mo.from_string(h, s);
+	mo.run();
+	EXPECT_EQ(mo.correct(), true);
+}
+
+// same as `t431p2_cuda`, but with the flat NN tree
+TEST(MayOzerov, t431p2_cuda_flat) {
+	using namespace c431;
+	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=2,.l=12,.c=0,.threads=1};
+	static constexpr ConfigMayOzerov config{isdConfig, 2, 50, 11, 32, 4096, 16, false, true, true};
+
+	MayOzerov<isdConfig, config> mo{};
+	mo.from_string(h, s);
+	mo.run();
+	EXPECT_EQ(mo.correct(), true);
+}
+
 // p = 2 with lists of ~60k elements: 1 level, ~1.5k elements per root
 TEST(MayOzerov, t431p2_cuda) {
 	using namespace c431;
