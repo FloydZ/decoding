@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
 
-from CryptographicEstimators.cryptographic_estimators.SDEstimator.SDAlgorithms import BJMMplus as SDBJMM, Dumer as SDDumer, Prange as SDPrange
-from CryptographicEstimators.cryptographic_estimators.SDFqEstimator.SDFqAlgorithms import Stern as SDFqStern, Prange as SDFqPrange
-from CryptographicEstimators.cryptographic_estimators.SDEstimator import SDProblem
-from CryptographicEstimators.cryptographic_estimators.SDFqEstimator import SDFqProblem
+try:  # pip package `cryptographic_estimators`
+    from cryptographic_estimators.SDEstimator.SDAlgorithms import BJMMplus as SDBJMM, Dumer as SDDumer, Prange as SDPrange
+    from cryptographic_estimators.SDFqEstimator.SDFqAlgorithms import Stern as SDFqStern, Prange as SDFqPrange
+    from cryptographic_estimators.SDEstimator import SDProblem
+    from cryptographic_estimators.SDFqEstimator import SDFqProblem
+except ImportError:  # local clone
+    from CryptographicEstimators.cryptographic_estimators.SDEstimator.SDAlgorithms import BJMMplus as SDBJMM, Dumer as SDDumer, Prange as SDPrange
+    from CryptographicEstimators.cryptographic_estimators.SDFqEstimator.SDFqAlgorithms import Stern as SDFqStern, Prange as SDFqPrange
+    from CryptographicEstimators.cryptographic_estimators.SDEstimator import SDProblem
+    from CryptographicEstimators.cryptographic_estimators.SDFqEstimator import SDFqProblem
 
 from subprocess import Popen, PIPE, STDOUT
 from enum import Enum
