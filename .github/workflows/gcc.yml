@@ -1,0 +1,36 @@
+name: gcc
+
+on: [push]
+
+jobs:
+  build:
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(vars.GCC_BUILD_MATRIX) }}
+
+    name: ${{ matrix.os }}, gcc-${{ matrix.version }}, ${{ matrix.build_type }} no opt
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - name: Install Software
+      run: |
+        sudo apt-get update -y
+        sudo apt-get install -y cmake g++-${{matrix.version}} gcc-${{matrix.version}} libgtest-dev
+
+    - uses: actions/checkout@v6
+      with:
+        submodules: recursive
+
+    - name: Configure CMake
+      env:
+        CXX: g++-${{ matrix.version }}
+        CC: gcc-${{ matrix.version }}
+      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{matrix.build_type}} -DENABLE_AUTO_OPTIMIZATIONS=OFF
+
+    - name: Build
+      run: cmake --build ${{github.workspace}}/build --parallel 4
+
+    - name: Test
+      working-directory: ${{github.workspace}}/build
+      run: ctest -C Debug -VV --timeout 1200 -j 4

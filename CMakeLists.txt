@@ -1,3 +1,4 @@
+
 cmake_minimum_required(VERSION 3.20)
 project(decoding)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -43,7 +44,9 @@ include(CheckLanguage) 			# needed for `check_language(CUDA)`
 # NOTE: cryptanalysislib is header only, hence it is not build (neither its
 # tests nor its benchmarks). Only its `src` directory is included below.
 
-include("${CMAKE_CURRENT_SOURCE_DIR}/deps/cryptanalysislib/deps/cmake_optimize_for_architecture/HostOptimizations.cmake")
+# NOTE: must be defined, otherwise no `-m<ext>`/`-DUSE_<EXT>` flags are added
+set(CMAKE_HOST_DO_NOT_ADD_TO_FLAGS OFF)
+include("${CMAKE_CURRENT_SOURCE_DIR}/deps/cryptanalysislib/deps/cmake_optimize_for_architecture/host_optimizations.cmake")
 
 check_cxx_compiler_flag(-march=native COMPILER_SUPPORTS_MARCH_NATIVE)
 check_cxx_compiler_flag(-fno-inline COMPILER_SUPPORTS_NO_INLINE)
@@ -64,6 +67,15 @@ unset(CMAKE_REQUIRED_LIBRARIES)
 # dependencies. 
 enable_testing()
 # NOTE: only C++ is compiled, the C compiler may lack OpenMP (AppleClang)
+# NOTE: AppleClang has no OpenMP, brew's `libomp` is keg-only
+if(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+	execute_process(COMMAND brew --prefix libomp OUTPUT_VARIABLE LIBOMP_PREFIX OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+	if(LIBOMP_PREFIX)
+		set(OpenMP_CXX_FLAGS "-Xpreprocessor -fopenmp -I${LIBOMP_PREFIX}/include")
+		set(OpenMP_CXX_LIB_NAMES omp)
+		set(OpenMP_omp_LIBRARY "${LIBOMP_PREFIX}/lib/libomp.dylib")
+	endif()
+endif()
 find_package(OpenMP REQUIRED COMPONENTS CXX)
 find_package(Threads REQUIRED)
 find_package(GTest) 
@@ -193,6 +205,10 @@ endmacro()
 
 check_language(CUDA)
 if(CMAKE_CUDA_COMPILER)
+    # NOTE: must be set before `enable_language`, 1-bit WMMA needs sm_75+
+    if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+        set(CMAKE_CUDA_ARCHITECTURES 75)
+    endif()
     enable_language(CUDA)
 
     # global include path for dependencies
@@ -214,17 +230,12 @@ if(CMAKE_CUDA_COMPILER)
 
     # set the cuda standard
     if(NOT DEFINED CMAKE_CUDA_STANDARD)
-            set(CMAKE_CUDA_STANDARD 17)
+            set(CMAKE_CUDA_STANDARD 20)
             set(CMAKE_CUDA_STANDARD_REQUIRED True)
     endif()
 
 	set(CUDA_OPTIMIZE_FLAGS "-march=native -O3 --resource-usage --resource-usage -Xptxas -O3 -use_fast_math -extra-device-vectorization -restrict -Xptxas -warn-spills")
     #set(CUDA_OPTIMIZE_FLAGS "-march=native -O3 --resource-usage -ccbin=/usr/bin/gcc-9 --resource-usage -Xptxas -O3 -use_fast_math -extra-device-vectorization -restrict -Xptxas -warn-spills")
-
-    # fall back, if one does not directly have a CUDA rdy card, but rather a optimus (internal laptop) card.
-    #if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-            set(CMAKE_CUDA_ARCHITECTURES 75 61)
-    #endif()
 
     # this is needed to get the libary created
     #add_executable(test_cuda tests/test_cuda.cu)
@@ -247,10 +258,9 @@ include_directories("/usr/local/include")
 
 link_directories("/usr/local/lib")
 
-#TODO 
-# if (benchmark_FOUND)
-# 	add_subdirectory(bench)
-# endif()
+if (benchmark_FOUND)
+	add_subdirectory(bench)
+endif()
 if (GTest_FOUND)
 	add_subdirectory(tests)
 endif()
@@ -268,13 +278,19 @@ add_custom_target (
 
 
 # add the main target running our main algorithm
-#TODO add_executable(main main.cpp)
-# target_link_libraries(main ${LINK_TEST_FLAGS})
-
-# NOTE: there is currently no `main.cpp`. All targets below depend on it.
-if(NOT EXISTS ${CMAKE_SOURCE_DIR}/main.cpp)
+# NOTE: `main.h` is written by `decoding/optimize.py` into the build directory.
+# 	All `main*` targets below depend on it.
+set(MAIN_H ${CMAKE_BINARY_DIR}/main.h)
+if(EXISTS ${MAIN_H})
+	include_directories(${CMAKE_BINARY_DIR})
+	add_executable(main main.cpp)
+	target_link_libraries(main Threads::Threads OpenMP::OpenMP_CXX)
+	if(LINKER_SUPPORTS_ATOMIC)
+		target_link_libraries(main atomic)
+	endif()
+else()
 	if(USE_PROFILE OR USE_POLLY)
-		message(WARNING "USE_PROFILE/USE_POLLY need a `main.cpp`, which does not exist. Ignoring them.")
+		message(WARNING "USE_PROFILE/USE_POLLY need a `main.h`, see `decoding/optimize.py`. Ignoring them.")
 	endif()
 	set(USE_PROFILE OFF)
 	set(USE_POLLY OFF)
@@ -301,7 +317,7 @@ if(USE_PROFILE)
 endif()
 
 # NOTE: the compiler id is `Clang` (or `AppleClang`), never `clang`
-if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND EXISTS ${CMAKE_SOURCE_DIR}/main.cpp)
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND EXISTS ${MAIN_H})
     add_executable(main_PGO_instrumentation_first main.cpp)
     target_compile_options(main_PGO_instrumentation_first PUBLIC -fprofile-instr-generate -DUSE_LOOPS=2)
     target_link_libraries(main_PGO_instrumentation_first ${LINK_TEST_FLAGS} -fprofile-instr-generate)

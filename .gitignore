@@ -1,6 +1,7 @@
 .local-history/
 __pycache__
 *.log
+decoding.egg-info/
 cache.txt
 deps/NTRU/
 deps/NTRUEncrypt/
