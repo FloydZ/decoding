@@ -1,0 +1,91 @@
+name: cuda
+
+on: [push]
+
+# Builds and runs all CUDA tests (CMake target `cuda_tests`, ctest label `cuda`).
+#
+# GitHub hosted runners have no GPU. Hence:
+#   - `build`: compiles all CUDA tests for all supported architectures on a
+#     GitHub hosted runner. Catches compile errors, but cannot run anything.
+#   - `test`: builds for the local GPU and runs all CUDA tests on a self hosted
+#     runner with the labels [self-hosted, linux, x64, gpu]. It needs the CUDA
+#     toolkit, cmake, gtest and a C++23 compiler installed. The job only runs if
+#     the repository variable `CUDA_GPU_RUNNER` is set to `true`
+#     (Settings -> Secrets and variables -> Actions -> Variables), otherwise it
+#     would wait forever for a runner.
+
+env:
+  CUDA_VERSION: "12-9"
+  CUDA_PATH: /usr/local/cuda-12.9
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type: [Release, Debug]
+
+    name: Build CUDA tests (CUDA 12.9, ${{ matrix.build_type }})
+    runs-on: ubuntu-24.04
+
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        submodules: recursive
+
+    - name: Install Software
+      run: |
+        wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
+        sudo dpkg -i cuda-keyring_1.1-1_all.deb
+        sudo apt-get update
+        sudo apt-get install -y libtbb-dev g++-14 libgtest-dev libbenchmark-dev \
+          cuda-nvcc-${CUDA_VERSION} cuda-cudart-dev-${CUDA_VERSION} \
+          cuda-cccl-${CUDA_VERSION} libcurand-dev-${CUDA_VERSION}
+
+    # 1-bit WMMA needs sm_75+, sm_120 needs CUDA 12.8+
+    - name: Configure CMake
+      run: >
+        cmake -B ${{github.workspace}}/build
+        -DCMAKE_BUILD_TYPE=${{matrix.build_type}}
+        -DCMAKE_CXX_COMPILER=g++-14
+        -DCMAKE_CUDA_COMPILER=${CUDA_PATH}/bin/nvcc
+        -DCMAKE_CUDA_HOST_COMPILER=g++-14
+        -DCMAKE_CUDA_ARCHITECTURES="75;80;86;89;90;120"
+
+    - name: Build
+      run: cmake --build ${{github.workspace}}/build --target cuda_tests --parallel $(nproc)
+
+    - name: List CUDA tests
+      working-directory: ${{github.workspace}}/build
+      run: ctest -N -L cuda
+
+  test:
+    if: ${{ vars.CUDA_GPU_RUNNER == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type: [Release, Debug]
+
+    name: Test CUDA (${{ matrix.build_type }}) on GPU
+    runs-on: [self-hosted, linux, x64, gpu]
+
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        submodules: recursive
+
+    - name: GPU info
+      run: nvidia-smi
+
+    - name: Configure CMake
+      run: >
+        cmake -B ${{github.workspace}}/build
+        -DCMAKE_BUILD_TYPE=${{matrix.build_type}}
+        -DCMAKE_CUDA_ARCHITECTURES=native
+
+    - name: Build
+      run: cmake --build ${{github.workspace}}/build --target cuda_tests --parallel $(nproc)
+
+    - name: Test
+      working-directory: ${{github.workspace}}/build
+      run: ctest -L cuda --output-on-failure --timeout 600

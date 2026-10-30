@@ -1,0 +1,40 @@
+name: clang_osx
+
+on:
+  push:
+
+jobs:
+  build:
+    timeout-minutes: 120
+
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(vars.CLANG_BUILD_MATRIX) }}
+
+    name: macOS, ${{ matrix.build_type }}
+
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Software
+        run: brew install googletest
+
+      - name: Configure CMake
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DENABLE_AUTO_OPTIMIZATIONS=OFF
+
+      - name: Build
+        run: |
+          cmake --build build --parallel 4
+
+      - name: Test
+        working-directory: build
+        run: |
+          ctest -VV --timeout 1200 -j 4

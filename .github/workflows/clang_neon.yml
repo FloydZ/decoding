@@ -1,0 +1,39 @@
+name: clang_neon
+
+on: [push]
+
+jobs:
+  build:
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(vars.CLANG_NEON_BUILD_MATRIX) }}
+
+    name: ${{ matrix.os }}, clang-${{ matrix.version }}, ${{ matrix.build_type }} neon
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        submodules: recursive
+
+    - name: Install Software
+      run: |
+        sudo apt-get update -y
+        sudo apt-get install -y cmake clang-${{matrix.version }} libomp-${{matrix.version}}-dev libgtest-dev
+
+    - name: Configure CMake
+      env:
+        CXX: clang++-${{ matrix.version }}
+        CC: clang-${{ matrix.version }}
+      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{matrix.build_type}} -DENABLE_AUTO_OPTIMIZATIONS=OFF -DCMAKE_C_FLAGS="-DUSE_NEON -march=armv8.2-a" -DUSE_NEON=ON
+
+    - name: Build
+      env:
+        CXX: clang++-${{ matrix.version }}
+        C: clang-${{ matrix.version }}
+      run: cmake --build ${{github.workspace}}/build --parallel 4
+
+    - name: Test
+      working-directory: ${{github.workspace}}/build
+      run: ctest -C Debug -VV --timeout 6000 -j 4
