@@ -67,6 +67,15 @@ unset(CMAKE_REQUIRED_LIBRARIES)
 # dependencies. 
 enable_testing()
 # NOTE: only C++ is compiled, the C compiler may lack OpenMP (AppleClang)
+# NOTE: AppleClang has no OpenMP, brew's `libomp` is keg-only
+if(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+	execute_process(COMMAND brew --prefix libomp OUTPUT_VARIABLE LIBOMP_PREFIX OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+	if(LIBOMP_PREFIX)
+		set(OpenMP_CXX_FLAGS "-Xpreprocessor -fopenmp -I${LIBOMP_PREFIX}/include")
+		set(OpenMP_CXX_LIB_NAMES omp)
+		set(OpenMP_omp_LIBRARY "${LIBOMP_PREFIX}/lib/libomp.dylib")
+	endif()
+endif()
 find_package(OpenMP REQUIRED COMPONENTS CXX)
 find_package(Threads REQUIRED)
 find_package(GTest) 
@@ -196,6 +205,10 @@ endmacro()
 
 check_language(CUDA)
 if(CMAKE_CUDA_COMPILER)
+    # NOTE: must be set before `enable_language`, 1-bit WMMA needs sm_75+
+    if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+        set(CMAKE_CUDA_ARCHITECTURES 75)
+    endif()
     enable_language(CUDA)
 
     # global include path for dependencies
@@ -217,17 +230,12 @@ if(CMAKE_CUDA_COMPILER)
 
     # set the cuda standard
     if(NOT DEFINED CMAKE_CUDA_STANDARD)
-            set(CMAKE_CUDA_STANDARD 17)
+            set(CMAKE_CUDA_STANDARD 20)
             set(CMAKE_CUDA_STANDARD_REQUIRED True)
     endif()
 
 	set(CUDA_OPTIMIZE_FLAGS "-march=native -O3 --resource-usage --resource-usage -Xptxas -O3 -use_fast_math -extra-device-vectorization -restrict -Xptxas -warn-spills")
     #set(CUDA_OPTIMIZE_FLAGS "-march=native -O3 --resource-usage -ccbin=/usr/bin/gcc-9 --resource-usage -Xptxas -O3 -use_fast_math -extra-device-vectorization -restrict -Xptxas -warn-spills")
-
-    # fall back, if one does not directly have a CUDA rdy card, but rather a optimus (internal laptop) card.
-    #if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-            set(CMAKE_CUDA_ARCHITECTURES 75 61)
-    #endif()
 
     # this is needed to get the libary created
     #add_executable(test_cuda tests/test_cuda.cu)

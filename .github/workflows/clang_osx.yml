@@ -21,7 +21,7 @@ jobs:
           submodules: recursive
 
       - name: Install Software
-        run: brew install googletest
+        run: brew install googletest libomp
 
       - name: Configure CMake
         env:
