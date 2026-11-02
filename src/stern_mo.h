@@ -1,5 +1,5 @@
-#ifndef DECODING_STERNMO
-#define DECODING_STERNMO
+#ifndef DECODING_STERN_MO
+#define DECODING_STERN_MO
 
 #include <cstdint>
 #include <utility>

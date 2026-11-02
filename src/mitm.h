@@ -26,18 +26,18 @@ public:
 		return __data;
 	}
 
-	template<const uint32_t strive=1>
+	template<const uint32_t stride=1>
 	constexpr static __FORCEINLINE__ CollisionType create(const T data,
 												 const index_type *index) noexcept {
-		static_assert(strive > 0);
+		static_assert(stride > 0);
 		CollisionType ret;
 		ret.__data = data;
-		if constexpr (strive == 1) {
+		if constexpr (stride == 1) {
 			// NOTE: the last argument is the number of elements, not bytes
 			cryptanalysislib::memcpy(ret.index, index, p);
 		} else {
 			for (uint32_t i = 0; i < p; ++i) {
-				ret.index[i] = index[i*strive];
+				ret.index[i] = index[i*stride];
 			}
 		}
 		return ret;

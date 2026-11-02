@@ -3,7 +3,7 @@
 
 #include "matrix/binary_matrix.h"
 #include "container/hashmap.h"
-#include "popcount/popcount.h"
+#include "algorithm/bits/popcount.h"
 #include "math/bc.h"
 #include "alloc/alloc.h"
 #include "hash/simple.h"
@@ -72,8 +72,9 @@ public:
 
 	// hashmap stuff
 	using keyType = LogTypeTemplate<l>;
-	using V1 = CollisionType<l_type, 1*p>; // TODO generalize to `SternCollisionType`
-	using V2 = CollisionType<l_type, 2*p>;
+	// TODO generalize to `SternCollisionType`
+	using V1 = CollisionType<l_type, uint16_t, 1*p>;
+	using V2 = CollisionType<l_type, uint16_t, 2*p>;
 
 	constexpr static uint64_t HM1_nrbuckets = 1u << l1;
 	constexpr static uint64_t HM1_bucketsize = bc(k+l, p) >> l1;
@@ -112,12 +113,12 @@ public:
 	MOIM() noexcept {
 		constexpr size_t size_lHT = roundToAligned<1024>(sizeof(l_type) * (k+l));
 		l1HT =(l_type *)cryptanalysislib::aligned_alloc(1024, size_lHT);
-		ASSERT(l1HT);
+		assert(l1HT);
 
 		hm1 = new HM1{};
-		ASSERT(hm1);
+		assert(hm1);
 		hm2 = new HM2{};
-		ASSERT(hm2);
+		assert(hm2);
 
 		bEnum = new EnumHashMap<configEnum, HM1>{l1HT, hm1};
 		cEnum = new CollisionHashMap<configEnum, HM1>{l1HT, hm1};
@@ -131,13 +132,13 @@ public:
 
 			auto climb = ws.ptr(0);
 			for (uint32_t j = 0; j < 2*p; j++) {
-				ASSERT(left[j] < (k+l));
-				ASSERT(right[j] < (k+l));
+				assert(left[j] < (k+l));
+				assert(right[j] < (k+l));
 
 				climb ^= (HT[left[j]][0] ^ HT[right[j]][0]);
 			}
 
-			ASSERT((climb & ((1ul<<l1)-1ul)) == 0);
+			assert((climb & ((1ul<<l1)-1ul)) == 0);
 			uint32_t wt = cryptanalysislib::popcount::popcount(climb);
 
 			// early exit
@@ -149,8 +150,8 @@ public:
 			for (uint32_t i = 1; i < NR_HT_LIMBS; i++) {
 				climb = ws.ptr(i);
 				for (uint32_t j = 0; j < 2*p; j++) {
-					ASSERT(left[j] < (k+l));
-					ASSERT(right[j] < (k+l));
+					assert(left[j] < (k+l));
+					assert(right[j] < (k+l));
 
 					climb ^= HT[left[j]][i] ^ HT[right[j]][i];
 				}
@@ -183,14 +184,9 @@ public:
 		static_assert(l1 < 32);
 		uint32x8_t rows[p];
 		uint32x8_t right_index = uint32x8_t::setr(0, 1, 2, 3, 4, 5, 6, 7);
-		constexpr uint32x8_t eight = uint32x8_t::set1(8);
+		const uint32x8_t eight = uint32x8_t::set1(8);
 		constexpr uint32x8_t multiplier = uint32x8_t::set1(HM1_bucketsize);
 		uint32x8_t tmpl{}, tmpr{};
-
-		// reset the counters
-		// TODO replace this with the new `intermediatelist` stuff
-		intermediate_L2_ctr = 0; intermediate_L2_ctr = 0;
-		L_ctr = 0; R_ctr = 0;
 
 		// first compute collision between (L4,L2) and L1
 		for (size_t right_index_ = 0;
@@ -243,14 +239,15 @@ public:
 				const uint32x8_t lt_L4 = uint32x8_t::permute(left_index_L4, shfl_down_mask_L4);
 				const uint32x8_t rt_L4 = uint32x8_t::permute(right_index,   shfl_down_mask_L4);
 
+				// TODO not finished
 				//store the indices of the elements
-				_mm256_storeu_si256((__m256i *)(intermediate_L2_left.data()  + intermediate_L2_ctr), lt_L2);
-				_mm256_storeu_si256((__m256i *)(intermediate_L2_right.data() + intermediate_L2_ctr), rt_L2);
-				_mm256_storeu_si256((__m256i *)(intermediate_L4_left.data()  + intermediate_L4_ctr), lt_L4);
-				_mm256_storeu_si256((__m256i *)(intermediate_L4_right.data() + intermediate_L4_ctr), rt_L4);
+				// _mm256_storeu_si256((__m256i *)(intermediate_L2_left.data()  + intermediate_L2_ctr), lt_L2);
+				// _mm256_storeu_si256((__m256i *)(intermediate_L2_right.data() + intermediate_L2_ctr), rt_L2);
+				// _mm256_storeu_si256((__m256i *)(intermediate_L4_left.data()  + intermediate_L4_ctr), lt_L4);
+				// _mm256_storeu_si256((__m256i *)(intermediate_L4_right.data() + intermediate_L4_ctr), rt_L4);
 
-				intermediate_L2_ctr  += __builtin_popcount(mask2_L2);
-				intermediate_L4_ctr += __builtin_popcount(mask2_L4);
+				// intermediate_L2_ctr  += __builtin_popcount(mask2_L2);
+				// intermediate_L4_ctr += __builtin_popcount(mask2_L4);
 			} // end of iterate over HM1
 
 			// write the intermediate collision into the intermediate lists L and R
@@ -266,7 +263,7 @@ public:
 		// copy in the syndrome
 		tmp = ws;
 		for (uint32_t i = 0; i < 4*p; ++i) {
-			ASSERT(solutions[i] < k+l);
+			assert(solutions[i] < k+l);
 			Label::add(tmp.ptr(), tmp.ptr(), HT.row(solutions[i]));
 		}
 
@@ -276,7 +273,7 @@ public:
 		}
 
 		for (uint32_t i = 0; i < 4*p; ++i) {
-			ASSERT(n-k-l + solutions[i] < n);
+			assert(n-k-l + solutions[i] < n);
 			tmpe.set(1, 0, n-k-l + solutions[i]);
 		}
 
@@ -298,7 +295,7 @@ public:
 			ISD::extract_lHT(l1HT);
 			// ISD::extract_pHT(pHT); // TODO
 
-			const l_type iT1 = fastrandombytes_uint64() & ((1ul << l1) - 1ul);
+			const l_type iT1 = rng() & ((1ul << l1) - 1ul);
 			const l_type iT2 = ((iT1 ^ syndrome) & ((1ul << l1) - 1ul));
 			intermediate_current_size = 0;
 			intermediate_right_size = 0;
@@ -306,7 +303,7 @@ public:
 
 			// collision function
 			auto f1 = [&](const l_type a, uint16_t *index) __attribute__((always_inline)) {
-				ASSERT(bEnum->check_hashmap2(iT1, index, 2*p, l1));
+				assert(bEnum->check_hashmap2(iT1, index, 2*p, l1));
 				if (intermediate_current_size >= intermediate_max_size) {
 					return;
 				}
@@ -319,7 +316,7 @@ public:
 			};
 
 			auto f2 = [&](const l_type a, uint16_t *index) __attribute__((always_inline)) {
-				ASSERT(bEnum->check_hashmap2(iT2, index, 2*p, l1));
+				assert(bEnum->check_hashmap2(iT2, index, 2*p, l1));
 				if (intermediate_current_size >= intermediate_max_size) {
 					return;
 				}
@@ -349,11 +346,11 @@ public:
 					l_type tmp = syndrome;
 					#pragma unroll
 					for (uint32_t s = 0; s < 2*p; s++) {
-						ASSERT(intermediate_list_left[j][s] < (k+l));
+						assert(intermediate_list_left[j][s] < (k+l));
 						tmp ^= l1HT[intermediate_list_left[j][s]];
 					}
 
-					ASSERT(tmp < (1u<<l2));
+					assert(tmp < (1u<<l2));
 					hm2->insert(tmp, V2::create(tmp, intermediate_list_left[j]));
 				}
 
@@ -361,11 +358,11 @@ public:
 					l_type tmp = 0;
 					#pragma unroll p
 					for (uint32_t s = 0; s < p; s++) {
-						ASSERT(intermediate_list_left[j][s] < (k+l));
+						assert(intermediate_list_left[j][s] < (k+l));
 						tmp ^= l1HT[intermediate_list_right[j][s]];
 					}
 
-					ASSERT(tmp < (1u<<l2));
+					assert(tmp < (1u<<l2));
 					typename HM2::load_type left_load;
 					const size_t left_base = hm2->find(tmp, left_load);
 					for (size_t s = left_base; s < left_base + left_load; s++) {

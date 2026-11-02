@@ -51,6 +51,16 @@ stdenv.mkDerivation {
     llvmPackages.openmp
     llvm
 	gcc
+
+    cudaPackages.cuda_cudart
+    cudaPackages.cuda_nvcc
+    cudaPackages.cuda_cccl
+    cudaPackages.cuda_gdb
+    cudaPackages.cuda_cupti
+    cudaPackages.nsight_compute
+    cudaPackages.libcurand
+    linuxPackages.nvidia_x11
+
   ]++ (lib.optionals pkgs.stdenv.isLinux ([
    	flamegraph
    	gdb

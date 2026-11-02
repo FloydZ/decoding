@@ -62,7 +62,7 @@ public:
 	static_assert((l > 0) && (l < 32));
 	static_assert(config.dp_bits < l);
 
-	using ISD = ISDInstance<uint64_t, isd>;
+	using ISD			= ISDInstance<uint64_t, isd>;
 	using Error 		= typename ISD::Error;
 	using Label 		= typename ISD::Label;
 	using limb_type 	= typename ISD::limb_type;
@@ -209,6 +209,7 @@ public:
 		const uint32x8_t maxw = uint32x8_t::set1(max_walk);
 		uint32x8_t sel, rows[p];
 
+		// number distinguished points
 		uint32_t dps = 0;
 		while (dps < config.nr_dps) {
 			x = f(x, sel, rows);
