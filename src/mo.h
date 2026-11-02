@@ -9,6 +9,7 @@
 #include "simd/simd.h"
 #include "math/bc.h"
 #include "container/hashmap.h"
+#include "hash/simple.h"
 #include "nn/nn.h"
 
 class ConfigMO : public ConfigISD{
@@ -81,6 +82,10 @@ public:
 	constexpr static uint32_t l2 = config.l2;
 	constexpr static uint32_t l = config.l;
 	static_assert(l1 + l2 == l);
+
+	using ISD 	= ISDInstance<uint64_t, isd>;
+	using Error = typename ISD::Error;
+	using ISD::ws,ISD::e,ISD::P;
 
 	/// describes the number of columns to permute, instead of doing the full permutation
 	/// if set to 0 the normal permutation and gaussian elimination is applied.
@@ -175,8 +180,8 @@ public:
 	};
 
 	// Baselist
-	constexpr static SimpleHashMapConfig simpleHashMapConfig{HM1_BUCKETSIZE, HM1_NRBUCKETS};
-	using HM = SimpleHashMap<uint32_t, listType, simpleHashMapConfig, &Hash<l1>>;
+	constexpr static SimpleHashMapConfig simpleHashMapConfig{HM1_BUCKETSIZE, HM1_NRBUCKETS, config.threads};
+	using HM = SimpleHashMap<uint32_t, listType, simpleHashMapConfig, cryptanalysislib::Hash<uint32_t, 0, l1, 2>>;
 	HM *hm = nullptr;
 
 	/// TODO how to choose correctly?
@@ -211,7 +216,7 @@ public:
 
 		// hashmap only for the base list
 		hm = new HM();
-		ASSERT(hm);
+		assert(hm);
 	}
 
 	/// Deconstructor, freeing alot of stuff
@@ -292,12 +297,13 @@ public:
 
 			#pragma unroll
 			for (uint16_t j = 0; j < p; j++) {
-				tmp ^= _mm256_i32gather_epi32(lHT, rows[j], 4);
+				tmp ^= _mm256_i32gather_epi32((const int *)lHT, rows[j], 4);
 			}
 
-			const U256i u = { tmp };
+			alignas(32) uint32_t u[8];
+			_mm256_store_si256((__m256i *)u, tmp);
 			for (uint16_t j = 0; j < 8; j++) {
-				hm->insert(u.a[j], i*8 + j);
+				hm->insert(u[j], i*8 + j);
 			}
 		}
 	}
@@ -311,10 +317,10 @@ public:
 				 rows_l_L4[p], rows_r_L4[p];
 
 		for (size_t i = 0; i < min_ctr; i++) {
-			ASSERT(intermediate_L2_left[i]  < baselist_enumeration_size);
-			ASSERT(intermediate_L2_right[i] < baselist_enumeration_size);
-			ASSERT(intermediate_L4_left[i]  < baselist_enumeration_size);
-			ASSERT(intermediate_L4_right[i] < baselist_enumeration_size);
+			assert(intermediate_L2_left[i]  < baselist_enumeration_size);
+			assert(intermediate_L2_right[i] < baselist_enumeration_size);
+			assert(intermediate_L4_left[i]  < baselist_enumeration_size);
+			assert(intermediate_L4_right[i] < baselist_enumeration_size);
 
 			biject<baselist_enumeration_length, p>(intermediate_L2_left[i] , rows_l_L2);
 			biject<baselist_enumeration_length, p>(intermediate_L2_right[i], rows_r_L2);
@@ -322,13 +328,13 @@ public:
 			biject<baselist_enumeration_length, p>(intermediate_L4_right[i], rows_r_L4);
 
 			for (uint16_t a = 0; a < NR_HT_LIMBS; ++a) {
-				uint64_t tmp_L = 0, tmp_R = ws->rows[0][a];
+				uint64_t tmp_L = 0, tmp_R = ws.ptr(a);
 
 				for (uint16_t j = 0; j < p; j++) {
-					ASSERT(rows_l_L2[j] < kl_half);
-					ASSERT(rows_r_L2[j] < kl_half);
-					ASSERT(rows_l_L4[j] < kl_half);
-					ASSERT(rows_r_L4[j] < kl_half);
+					assert(rows_l_L2[j] < kl_half);
+					assert(rows_r_L2[j] < kl_half);
+					assert(rows_l_L4[j] < kl_half);
+					assert(rows_r_L4[j] < kl_half);
 
 					tmp_L ^= pHT [rows_l_L2[j]*NR_HT_LIMBS + a];
 					tmp_L ^= pHTr[rows_r_L2[j]*NR_HT_LIMBS + a];
@@ -356,7 +362,7 @@ public:
 		         *MO_index_r = intermediate_L2_right.data();
 		if (intermediate_L2_ctr < intermediate_L4_ctr) {
 			for (uint16_t i = 0; i < NR_HT_LIMBS; ++i) {
-				init_value [i] = ws->rows[0][i];
+				init_value [i] = ws.ptr(i);
 			}
 
 			T = R;
@@ -379,8 +385,8 @@ public:
 				uint64_t tmp = init_value[a];
 
 				for (uint16_t j = 0; j < p; j++) {
-					ASSERT(rows_l_L2[j] < kl_half);
-					ASSERT(rows_r_L2[j] < kl_half);
+					assert(rows_l_L2[j] < kl_half);
+					assert(rows_r_L2[j] < kl_half);
 
 					tmp ^= pHT [rows_l_L2[j]*NR_HT_LIMBS + a];
 					tmp ^= pHTr[rows_r_L2[j]*NR_HT_LIMBS + a];
@@ -527,7 +533,7 @@ public:
 
 				uint64_t tmp[NR_HT_LIMBS] = {0};
 				for (uint16_t a = 0; a < NR_HT_LIMBS; ++a) {
-					tmp[a] = ws->rows[0][a];
+					tmp[a] = ws.ptr(a);
 					for (uint16_t a2 = 0; a2 < p; a2++) {
 						tmp[a] ^= pHT[rows_l[a2]  * NR_HT_LIMBS + a];
 						tmp[a] ^= pHTr[rows_r[a2] * NR_HT_LIMBS + a];
@@ -562,7 +568,7 @@ public:
 		biject<baselist_enumeration_length, p>(right_index_L4, rows_r_L4);
 		biject<baselist_enumeration_length, p>(left_index_L4, rows_l_L4);
 
-		mzd_t *eprime = mzd_init(1, n);
+		Error eprime;
 
 		std::cout << loops << "\n";
 		std::cout << solutions[0] << " " << solutions[1] << "\n";
@@ -575,26 +581,24 @@ public:
 			std::cout << rows_r_L4[i] << " ";
 			std::cout << rows_l_L4[i] << "\n";
 
-			mzd_write_bit(eprime, 0, n-k-l1 + rows_r[i], 1);
-			mzd_write_bit(eprime, 0, n-k-l1 + rows_l[i], 1);
-			mzd_write_bit(eprime, 0, n-k-l1 + rows_r_L4[i], 1);
-			mzd_write_bit(eprime, 0, n-k-l1 + rows_l_L4[i], 1);
+			eprime.set(1, 0, n-k-l1 + rows_r[i]);
+			eprime.set(1, 0, n-k-l1 + rows_l[i]);
+			eprime.set(1, 0, n-k-l1 + rows_r_L4[i]);
+			eprime.set(1, 0, n-k-l1 + rows_l_L4[i]);
 		}
 
-		print_matrix("", eprime);
+		eprime.print();
 
 		for (uint32_t i = 0; i < NR_HT_LIMBS; ++i) {
-			eprime->rows[0][i] ^= L[solutions[0] * NR_HT_LIMBS + i];
-			eprime->rows[0][i] ^= R[solutions[1] * NR_HT_LIMBS + i];
+			eprime[0][i] ^= L[solutions[0] * NR_HT_LIMBS + i];
+			eprime[0][i] ^= R[solutions[1] * NR_HT_LIMBS + i];
 		}
 
-		print_matrix("", eprime);
+		eprime.print();
 
 		for (uint32_t i = 0; i < n; ++i) {
-			mzd_write_bit(e, 0, P->values[i], mzd_read_bit(eprime, 0, i));
+			e.set(eprime.get(0, i), 0, P.values[i]);
 		}
-
-		mzd_free(eprime);
     }
 
 	// runs MO
@@ -602,7 +606,7 @@ public:
 		config.print();
 		print();
 
-		ASSERT(l2 == 0);
+		assert(l2 == 0);
 		loops = 0;
 		not_found = true;
 		
@@ -610,25 +614,28 @@ public:
 
 		while (not_found && loops < config.loops) {
 			gaus_cycles -= cpucycles();
-			matrix_echelonize_partial_plusfix_opt
-					<n, k, l1>
-					(wA, wAT, config.m4ri_k, n - k - l1, md, P);
+			ISD::step();
 			gaus_cycles += cpucycles();
-
-			// Extract the sub-matrices. the length of the matrix is only n-c + DOOM_nr but we need to copy everything.
-			mzd_submatrix(H, wA, 0, n-k-l1, n-k, n+1);
-			mzd_transpose(HT, H);
 
 			//print_matrix("", HT);
 
-			extract_l1HT();
-			extract_pHT();
-
-			extract_syndrome();
+			ISD::template extract_lHT<uint32_t>(lHT);
+			// TODO `extract_pHT` writes rows of n-k bits, `pHT` expects n-k-l1
+			ISD::template extract_pHT<uint64_t>(pHT);
+			syndrome = ISD::syndrome;
 #ifdef USE_AVX2
 			fill_hashmap_avx2();
 #else
-			fill_hashmap();
+			hm->clear();
+			for (size_t i = 0; i < baselist_enumeration_size; i++) {
+				uint16_t rows[p];
+				biject<baselist_enumeration_length, p>(i, rows);
+				uint32_t tmp = 0;
+				for (uint32_t j = 0; j < p; j++) {
+					tmp ^= lHT[rows[j]];
+				}
+				hm->insert(tmp, i);
+			}
 #endif
 			// intermediate_lists_avx2();
 
@@ -647,7 +654,7 @@ public:
 
 			/// flush the remaining elements in the cache
 			///construct_LR();
-			ASSERT(check_LR());
+			assert(check_LR());
 
 			// clean up if needed. Internally this function is only execute if `coll_hash_simple_avx()`
 			// left some elements over.
@@ -687,7 +694,7 @@ public:
 
 	/// print important information about the instantiation of the algorithm which is not
 	/// part of the config
-	void print() const {
+	void print() const noexcept {
 		std::cout
 		        << "N: " << N
 		        << ", r: " << r
