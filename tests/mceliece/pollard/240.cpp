@@ -12,14 +12,14 @@ using ::testing::TestPartResult;
 using ::testing::UnitTest;
 
 
-TEST(PCS, t240p1) {
+TEST(Pollard, t240p1) {
 	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=1,.l=7,.c=0,.threads=1};
-	static constexpr ConfigPCS config{isdConfig, 2, 1u<<8, 8};
+	static constexpr ConfigPollard config{isdConfig, 1u<<8, true, true};
 
-	PCS<isdConfig, config> pcs{};
-	pcs.from_string(h, s);
-	pcs.run();
-	EXPECT_EQ(pcs.correct(), true);
+	Pollard<isdConfig, config> pollard{};
+	pollard.from_string(h, s);
+	pollard.run();
+	EXPECT_EQ(pollard.correct(), true);
 }
 
 int main(int argc, char **argv) {

@@ -54,8 +54,8 @@ public:
 ///		Pollard<config> pollard(ee, ss, A);
 ///		pollard.run();
 /// \tparam config constexpr initialisation of `ConfigPollard`
-template<const ConfigPollard &config>
-class Pollard {
+template<const ConfigISD &isd, const ConfigPollard &config>
+class Pollard : public ISDInstance<uint64_t, isd>{
 public:
 	// constants from the problem instance
 	constexpr static uint32_t n     = config.n;             // code length
@@ -327,8 +327,8 @@ public:
 	/// \param bitpos 	input the bit positions of the bits set in the corresponding value. E.g. nothing else than the columns to sum up.
 	constexpr inline void calcHe(LabelContainerType &label, const BitPosType bitpos[p]) noexcept {
 		// Some debugging safety measurements.
-		ASSERT((bitpos[0]) < iHT->nrows);
-		if constexpr(p == 2) { ASSERT((bitpos[1]) < iHT->nrows); }
+		assert((bitpos[0]) < iHT->nrows);
+		if constexpr(p == 2) { assert((bitpos[1]) < iHT->nrows); }
 
 		for (uint32_t i = 0; i < p; ++i) {
 			label ^= iHT->rows[bitpos[i]][0];
@@ -377,10 +377,10 @@ public:
 			} else if constexpr (p == 3) {
 				// TODO hash3(bitpos, &next, label);
 			} else {
-				ASSERT(0 && "wrong p");
+				assert(0 && "wrong p");
 			}
 		}
-		ASSERT(next <= 1);
+		assert(next <= 1);
 
 		// calculate depending on the `next` bit either He or He + s
 		// if (next == 0) { f1(label, bitpos);}
