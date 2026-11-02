@@ -3,6 +3,7 @@
 #include "../challenges/mce640.h"
 #include "stern_mo.h"
 #include "mo_im.h"
+#include "mo.h"
 
 using ::testing::EmptyTestEventListener;
 using ::testing::InitGoogleTest;

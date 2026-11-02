@@ -262,7 +262,7 @@ public:
 };
 
 template<const ConfigISD &isd, const ConfigMayOzerov &config>
-class MayOzerov : public ISDInstance<uint64_t, isd> {
+class MayOzerov_v2 : public ISDInstance<uint64_t, isd> {
 public:
 	constexpr static uint32_t n = isd.n;
 	constexpr static uint32_t k = isd.k;
@@ -357,7 +357,7 @@ public:
 #endif
 
 	/// allocates the base and level-1 lists
-	MayOzerov() noexcept {
+	MayOzerov_v2() noexcept {
 		nn_config.print();
 		expected_loops = config.compute_loops();
 
@@ -380,7 +380,7 @@ public:
 	}
 
 	/// frees the base lists
-	~MayOzerov() noexcept {
+	~MayOzerov_v2() noexcept {
 		cryptanalysislib::aligned_free(RK);
 		cryptanalysislib::aligned_free(RS);
 		cryptanalysislib::aligned_free(BL);

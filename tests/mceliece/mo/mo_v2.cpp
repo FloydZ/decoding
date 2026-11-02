@@ -15,7 +15,7 @@ namespace c431 {
 #include "mce431.h"
 }
 
-#include "may_ozerov.h"
+#include "mo_v2.h"
 
 using ::testing::InitGoogleTest;
 
@@ -25,7 +25,7 @@ TEST(MayOzerov, t240p1) {
 	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=1,.l=4,.c=0,.threads=1};
 	static constexpr ConfigMayOzerov config{isdConfig, 1, 10, 10, 32, 256, 4};
 
-	MayOzerov<isdConfig, config> mo{};
+	MayOzerov_v2<isdConfig, config> mo{};
 	mo.from_string(h, s);
 	mo.run();
 	EXPECT_EQ(mo.correct(), true);
@@ -37,7 +37,7 @@ TEST(MayOzerov, t240p1bf) {
 	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=1,.l=4,.c=0,.threads=1};
 	static constexpr ConfigMayOzerov config{isdConfig, 1, 10, 10, 32, 256, 4, true};
 
-	MayOzerov<isdConfig, config> mo{};
+	MayOzerov_v2<isdConfig, config> mo{};
 	mo.from_string(h, s);
 	mo.run();
 	EXPECT_EQ(mo.correct(), true);
@@ -49,7 +49,7 @@ TEST(MayOzerov, t431p1) {
 	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=1,.l=8,.c=0,.threads=1};
 	static constexpr ConfigMayOzerov config{isdConfig, 1, 10, 14, 32, 1024, 64};
 
-	MayOzerov<isdConfig, config> mo{};
+	MayOzerov_v2<isdConfig, config> mo{};
 	mo.from_string(h, s);
 	mo.run();
 	EXPECT_EQ(mo.correct(), true);
@@ -61,7 +61,7 @@ TEST(MayOzerov, t431p1nn) {
 	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=1,.l=6,.c=0,.threads=1};
 	static constexpr ConfigMayOzerov config{isdConfig, 2, 10, 14, 32, 64, 16};
 
-	MayOzerov<isdConfig, config> mo{};
+	MayOzerov_v2<isdConfig, config> mo{};
 	mo.from_string(h, s);
 	mo.run();
 	EXPECT_EQ(mo.correct(), true);
@@ -73,7 +73,7 @@ TEST(MayOzerov, t100p2) {
 	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=2,.l=8,.c=0,.threads=1};
 	static constexpr ConfigMayOzerov config{isdConfig, 1, 10, 10, 32, 1024, 8};
 
-	MayOzerov<isdConfig, config> mo{};
+	MayOzerov_v2<isdConfig, config> mo{};
 	mo.from_string(h, s);
 	mo.run();
 	EXPECT_EQ(mo.correct(), true);
@@ -85,7 +85,7 @@ TEST(MayOzerov, t100p3) {
 	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=3,.l=12,.c=0,.threads=1};
 	static constexpr ConfigMayOzerov config{isdConfig, 1, 10, 10, 32, 1u << 13u, 8};
 
-	MayOzerov<isdConfig, config> mo{};
+	MayOzerov_v2<isdConfig, config> mo{};
 	mo.from_string(h, s);
 	mo.run();
 	EXPECT_EQ(mo.correct(), true);
