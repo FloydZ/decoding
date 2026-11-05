@@ -26,22 +26,22 @@ public:
 	const bool reset_intermediate_list = true;
 
 	/// number of `limbs` to walk down in the algorithm
-	constexpr static uint32_t r = 2;
+	const uint32_t r = 2;
 
 	/// number of leaves on each iteration level
-	constexpr static uint32_t N = 100;
+	const uint32_t N = 100;
 
 	///
-	constexpr static uint32_t nnk = 32;
+	const uint32_t nnk = 32;
 
 	/// weight to match on each check
-	constexpr static uint32_t dk = 12;
+	const uint32_t dk = 12;
 
 	/// allowed offset (unused)
-	constexpr static uint32_t epsilon = 0;
+	const uint32_t epsilon = 0;
 
 	/// bruteforce the remaining list below this threshold
-	constexpr static uint32_t bruteforce_threshold = 1024;
+	const uint32_t bruteforce_threshold = 1024;
 
 	/// expected number of permutations (ignores the representations)
 	[[nodiscard]] consteval uint64_t compute_loops() const noexcept {
@@ -163,7 +163,7 @@ public:
 	constexpr static uint32_t bruteforce_threshold = config.bruteforce_threshold;
 
 	/// Define the nearest neighbour struct
-	constexpr static NN_Config nn_config{n-k-l1, r, N, nnk, size_LR, dk, d, epsilon, bruteforce_threshold};
+	constexpr static NN_Config nn_config{n-k-l1, r, N, nnk, NR_LR, dk, d, epsilon, bruteforce_threshold};
 	NN<nn_config> nn_algo {};
 	using NNElement= typename NN<nn_config>::Element;
 
