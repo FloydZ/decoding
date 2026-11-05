@@ -234,7 +234,9 @@ if(CMAKE_CUDA_COMPILER)
             set(CMAKE_CUDA_STANDARD_REQUIRED True)
     endif()
 
-	set(CUDA_OPTIMIZE_FLAGS "-march=native -O3 --resource-usage --resource-usage -Xptxas -O3 -use_fast_math -extra-device-vectorization -restrict -Xptxas -warn-spills")
+
+	set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-relaxed-constexpr -DUSE_CUDA")
+	set(CUDA_OPTIMIZE_FLAGS "-march=native -O3 --resource-usage --resource-usage -Xptxas -O3 -use_fast_math -extra-device-vectorization -restrict -Xptxas -warn-spills --expt-relaxed-constexpr")
     #set(CUDA_OPTIMIZE_FLAGS "-march=native -O3 --resource-usage -ccbin=/usr/bin/gcc-9 --resource-usage -Xptxas -O3 -use_fast_math -extra-device-vectorization -restrict -Xptxas -warn-spills")
 
     # this is needed to get the libary created

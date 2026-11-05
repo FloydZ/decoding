@@ -42,70 +42,7 @@
 	///                  tx -> │ f_1(z)  │           │ f_2(z)  │ <- tx
 	///                        │         │           │         │
 	///                        └─────────┘           └─────────┘
-/// just computes n over 3
-/// \tparam T
-/// \param n
-/// \return
-template<typename T>
-__device__
-inline T max_bc_helper3(const T n) {
-	constexpr T re = 6; // Assumes k = 3
 
-	assert(n >= 3);
-
-	const T a = n*(n-1)*(n-2);
-
-	return a/re;
-}
-
-/// final opt version
-/// \param a input number
-/// \param n max bits
-/// \param k max weight
-/// \return maximal ctr < n, s.t. k+ctr over k <= a
-template<typename T, const uint32_t k>
-__device__
-inline T opt_max_bc(const T a, const uint32_t n) {
-	if constexpr(k == 1) {
-		return n - k - a;
-	}
-
-	if constexpr (k == 2) {
-#ifdef __CUDA_ARCH__
-		//const uint32_t t = (sqrtf((a<<3) + 1u) + 1.)/2.;
-		const uint32_t t = ((uint32_t)(sqrtf((a<<3) + 1u) + 1u)) >> 1u;
-		//const uint32_t t =  uint32_t(__builtin_sqrt((a<<3) + 1) + 1) >> 1;
-#else
-		const uint32_t t =  uint32_t(__builtin_sqrt(8 * a + 1) + 1) >> 1;
-#endif
-		return n - t - 1;
-	}
-
-	if constexpr (k == 3) {
-		constexpr uint32_t 	bitsize = sizeof(T) * 8;
-		// const uint32_t k	1 = k-1;
-
-#ifdef __CUDA_ARCH__
-		int ctr = bitsize -	 __clz(a|1);
-#else
-		int ctr = bitsize -	 __builtin_clz(a|1);
-#endif
-		T tmp = max_bc_helper3(k+ctr);
-		T c = k+ctr, d = ctr;
-		tmp = (tmp*d) / c;
-		while ((tmp > a) && (ctr > 0)) {
-			ctr -= 1;
-			d -= 1;
-			c -= 1;
-			tmp = (tmp*d) / c;
-		}
-
-		return  n - ctr - k;
-	}
-
-	// will never happen
-	return 0;
-}
 
 /// optimized unrolled version
 /// same as the function above, but returning the indicies of the set bits.
