@@ -4,17 +4,10 @@
 #include <stdint.h>
 #include <curand_kernel.h>
 
-#include "cuhelper.cuh"
-#include "cuMisc.cuh"
-#include "cuHashMap.cuh"
-#include "helper.h"
+#include "helper.cuh"
+#include "pollard.h"
 
 
-/// configuration struct containing all important flags.
-/// \tparam T	base limb type of everything on the gpu.
-template<typename T>
-class ConfigPollard {
-private:
 	/// Construction of the algorithm
 	///        n-k-l
 	///  ◄───────────►   l   ◄───         k       ───────────►
@@ -49,160 +42,6 @@ private:
 	///                  tx -> │ f_1(z)  │           │ f_2(z)  │ <- tx
 	///                        │         │           │         │
 	///                        └─────────┘           └─────────┘
-	// disable the default constructor
-	constexpr ConfigPollard() : n(0), k(0), w(0), l(0), p(0) {}
-public:
-	// instance parameters
-	const uint32_t n;   // code length
-	const uint32_t k;   // code size
-	const uint32_t w;   // code weight
-	const uint32_t p;   // weight in the base lists. In this case the weight which is
-						// mapped to by the collision functions
-	const uint32_t l;   // bits to match on by the two collision functions
-	
-	// opt m4ri c
-	const uint32_t gaus_c = 50;
-
-	// if set to `true` the algorithm uses a perfect bijection to calculate the
-	// hashing function.
-	const bool bijection            = false;
-
-	// if set to true: stern is used
-	// if set to false: dumer is used
-	const bool stern                = true;
-
-	// length of the k part
-	const uint32_t kl_length        = stern ? k : k+l;
-
-	// Additional parameters
-	const uint32_t cpu_gpu_matrix_factor = sizeof(uint64_t) / sizeof(T); // size factor between a limb of the cpu and gpu
-	const uint32_t cpu_matrix_rows  = kl_length+1;  // CPU Matrix rows of HT
-	const uint32_t cpu_matrix_width = (n-k+63)/64;  // CPU Matrix width in limbs of HT
-	const uint32_t gpu_matrix_width = cpu_gpu_matrix_factor * cpu_matrix_width; // same as `cpu_matrix_with` but for the gpu
-
-	// Width of the lpart is always 1. => l < 32, l < 164.
-	const uint32_t iHwidth          = l <= 32 ? 1 : 2;
-
-	// position of the `l` part in the label.
-	const uint32_t llimbpos         = (n-k-1)/(sizeof(T)*8); //IMPORTANT: must be 0 aligned
-
-	// Calculate the optimal `r` value for M4RI
-	const uint32_t m4ri_k = matrix_opt_k(n - k, MATRIX_AVX_PADDING(n));
-
-	// if this value is set to a different value then -1 the program will end the
-	// computation after `loops` permutation, regardless if it found the solution or not
-#ifdef USE_LOOPS
-	const uint64_t loops        = USE_LOOPS;
-#else
-	const uint64_t loops        = uint64_t(-1);
-#endif
-
-	// print every `print_loops` iterations a status update of the program
-#ifdef PRINT_LOOPS
-	const uint64_t print_loops  = PRINT_LOOPS;
-#else
-	const uint64_t print_loops  = 1000;
-#endif
-
-	// Nr of stream per thread.
-	// currently unused
-	const uint32_t nr_streams   = 1;
-	// number of different cpu threads working on different permutations.
-	// currently unused
-	const uint32_t nr_threads   = 1;
-
-	// nr of concurrent random walk we start
-	const uint32_t nr_walks     = 1u << l;
-
-	const uint32_t nr_iters     = 1;
-
-	/// standard constructor
-	constexpr ConfigPollard(const uint32_t n,
-	                        const uint32_t k,
-	                        const uint32_t l,
-	                        const uint32_t w,
-	                        const uint32_t p,
-	                        const bool bijection=true,
-	                        const bool stern=true,
-	                        const uint32_t nr_iters=1,
-							const uint32_t nr_walks=-1) :
-			n(n), k(k), l(l), w(w), p(p), bijection(bijection), stern(stern),
-			nr_iters(uint32_t(nr_iters)), nr_walks(uint32_t(nr_walks == -1 ? 1u << l : nr_walks)) {};
-
-	constexpr ConfigPollard(ConfigPollard &c) = default;
-
-	// returns the expected number of iterations
-	constexpr uint64_t Loops() const {
-#ifdef EXPECTED_PERMUTATIONS
-		return EXPECTED_PERMUTATIONS;
-#else
-		//return bc(n, w)/( bc(n-k-l, w-2*p) * bc(k, 2*p));
-		return bc(n, w)/( bc(n-k-l, w-2*p) * bc(k/2, p) * bc(k/2, p));
-#endif
-	}
-
-	// print some information about the configuration
-	void print() const {
-		std::cout << "cuPollard: n: " << unsigned(n)
-		          << ", k: " << unsigned (k)
-		          << ", l: " << unsigned (l)
-		          << ", n-k:" << unsigned (n-k)
-		          << ", p: " << unsigned (p)
-		          << ", cpu_gpu_matrix_factor: " << cpu_gpu_matrix_factor
-		          << ", gpu_matrix_width: " << gpu_matrix_width
-		          << ", cpu_matrix_width: " << cpu_matrix_width
-		          << ", cpu_matrix_rows: " << cpu_matrix_rows
-		          << ", m4ri_k: " << m4ri_k
-		          << ", llimbpos: " << llimbpos
-		          << ", iHwidth: " << iHwidth
-				  << ", nr_walks: " << nr_walks
-		          << ", nr_iters: " << nr_iters
-		          << ", bijection: " << bijection
-				  << ", stern: " << stern
-		          << ", n-k-l: " << n-k-l 
-				  << ", loops: " << loops
-				  << ", print_loops: " << print_loops
-				  << "\n";
-	}
-
-	/// \param loops
-	/// \param time
-	/// \param total_kernel_runtime
-	void print_loop(const uint64_t loops, const double time, const float total_kernel_runtime) const {
-		const double expteded_time = Loops()/loops*time;
-
-		std::cout << "runtime: "  << time << "s"
-		          << ", loops: " << loops << "(" << Loops() <<")=" << loops / Loops() << "x"
-		          << ", total kernel runtime: " << total_kernel_runtime<< "s (" << total_kernel_runtime/time*100. << "%)"
-		          << ", loops/kernel s: " << loops/total_kernel_runtime
-		          << ", loops/s: "<< loops/time
-		          << ", E[RT]=" << expteded_time << "s(" << time/expteded_time << "x)"
-		          << "\r" << std::flush;//"\n";
-	}
-};
-
-
-
-// TODO remove?
-///
-/// \tparam T
-/// \tparam n
-/// \tparam k
-/// \tparam l
-/// \param wH
-/// \return
-template<typename T, const uint32_t n, const uint32_t k, const uint32_t l>
-T exctract_l_bit(const mzd_t *__restrict__ wH) {
-	T ret = 0;
-	//mzd_print((mzd_t *)wH);
-	for (uint32_t i = n-k-l; i < n-k; i++) {
-		uint32_t bit = mzd_read_bit(wH, i, n);
-		ret ^= (bit << (i-(n-k-l)));
-	}
-	return ret;
-}
-
-
 /// just computes n over 3
 /// \tparam T
 /// \param n
@@ -290,7 +129,7 @@ uint16_t opt_bijection_fkt(uint16_t ret[w], const T label) {
 		wn -= 1;
 		ret[0] = wn;
 
-		ASSERT(wn < n);
+		assert(wn < n);
 		// printf("%d %d %d %d %d\n", wn, n, w, a, label);
 	}
 
@@ -302,14 +141,14 @@ uint16_t opt_bijection_fkt(uint16_t ret[w], const T label) {
 		// decrement the counter and set the bit accordingly
 		wn -= 1;
 		ret[0] = wn;
-		ASSERT(wn < n);
+		assert(wn < n);
 
 		wn -= opt_max_bc<T, 1>(a, wn);
 
 		// decrement the counter and set the bit accordingly
 		wn -= 1;
 		ret[1] = wn;
-		ASSERT(wn < n);
+		assert(wn < n);
 	}
 
 	if constexpr (w == 3) {
@@ -322,8 +161,8 @@ uint16_t opt_bijection_fkt(uint16_t ret[w], const T label) {
 		// decrement the counter and set the bit accordingly
 		wn -= 1;
 		ret[0] = wn;
-		ASSERT(wn < n);
-		ASSERT(a < binom);
+		assert(wn < n);
+		assert(a < binom);
 
 		// w == 2
 		wn -= opt_max_bc<T, 2>(a, wn);
@@ -333,14 +172,14 @@ uint16_t opt_bijection_fkt(uint16_t ret[w], const T label) {
 		// decrement the counter and set the bit accordingly
 		wn -= 1;
 		ret[1] = wn;
-		ASSERT(wn < n);
+		assert(wn < n);
 
 		wn -= opt_max_bc<T, 1>(a, wn);
 
 		// decrement the counter and set the bit accordingly
 		wn -= 1;
 		ret[2] = wn;
-		ASSERT(wn < n);
+		assert(wn < n);
 	}
 
 	// return a&1;
@@ -604,7 +443,7 @@ __device__ __forceinline__ T flavour(curandState *__restrict__ state) noexcept {
 /// \tparam Hwidth number of `T` limbs in the parity check matrix HT (must be passed as transposed)
 /// \tparam iHwidth number `lT` limb needed to hold the `l` part of the parity check matrix of one row. Most likely == 1
 /// \tparam llimbpos limb position of the `l` part in each row of the parity check matrix `HT`
-/// \param pde output: reconstructed error vector
+/// \param pde output: the 2p rows of `pdHT` of the solution
 /// \param pdHT input: transposed parity check matrix of size n-k \times k
 /// \param pdiHT2 input: same as `pdHT` but only the `l` part of each row (aligend to zero)
 /// \param pds2 input: syndrome
@@ -632,8 +471,7 @@ __global__ void KernelPollard(T *__restrict__ pde,          //
 {
 	// going to be the number of rows in the matrix
 	constexpr uint32_t kl_length  = stern ? k : k+l;
-	constexpr uint32_t T_bitwidth = sizeof(T) * 8;
-	// int idx = blockIdx.x * blockDim.x + threadIdx.x;
+	const uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
 
 	// first copy everything into the shared memory to speed up things
 	__shared__ lT pdiHT[iHwidth*kl_length];
@@ -670,8 +508,8 @@ __global__ void KernelPollard(T *__restrict__ pde,          //
 	uint16_t bitset1[p], bitset2[p];
 	for (uint32_t iters = 0; iters < nr_iters; iters++) {
 		constexpr lT lMask = (T(1) << l) - 1;
-		sp = lT(curand(&state[threadIdx.x])) & lMask;
-		r = lT(curand(&state[threadIdx.x])) & lMask;
+		sp = lT(curand(&state[idx])) & lMask;
+		r = lT(curand(&state[idx])) & lMask;
 		//flavour<T, l>(state);// & lMask;
 		//r = (blockIdx.x + idx) & lMask;     // choose a random start point
 		//sp = (idx<<1) & lMask;              // choose a random flavor
@@ -759,27 +597,10 @@ __global__ void KernelPollard(T *__restrict__ pde,          //
 			if (0 != atomicCAS(compare, 0, 1))
 				return;
 
-			// copy the final n-k-l coordinates of the label into the
-			// error vector.
-			for (uint32_t i = 0; i < Hwidth; i++) {
-				pde[i] = x[i];
-			}
-
-			// and set the last k+l coordinates to the bit positions
-			// which result into the label with low weight.
+			// the host reconstructs the error from the rows
 			for (uint32_t i = 0; i < p; i++) {
-				const uint32_t offset = stern ? n-k : n-k-l;
-				// first calculate the limb of the bit position to set
-				const uint32_t pos1 = (offset + bitset1[i]) / T_bitwidth;
-				const uint32_t pos2 = (offset + bitset2[i]) / T_bitwidth;
-
-				// then calculate the bit position within the limb to set
-				const uint32_t shift1 = (offset + bitset1[i]) % T_bitwidth;
-				const uint32_t shift2 = (offset + bitset2[i]) % T_bitwidth;
-
-				// and finally set the bits.
-				pde[pos1] ^= (T(1) << shift1);
-				pde[pos2] ^= (T(1) << shift2);
+				pde[i]     = bitset1[i];
+				pde[p + i] = bitset2[i];
 			}
 		}
 	}
@@ -795,203 +616,84 @@ void InitRandomNumberGenerator(curandState *state,
 	curand_init(seed, idx, 0, &state[idx]);
 }
 
+/// GPU version of `Pollard`: the gaus runs on the CPU, the walks in `KernelPollard`
+/// Usage:
+///		cuPollard<isdConfig, config> pollard{};
+///		pollard.from_string(h, s);
+///		pollard.run();
+template<const ConfigISD &isd, const ConfigPollard &config>
+class cuPollard : public Pollard<isd, config> {
+public:
+	using Base   = Pollard<isd, config>;
+	using ISD    = typename Base::ISD;
+	using l_type = typename Base::l_type;
+	using Base::n, Base::k, Base::w, Base::p, Base::l, Base::kl;
+	using Base::solutions, Base::ws, Base::syndrome, Base::lHT, Base::not_found, Base::loops;
 
-/// \tparam T
-/// \tparam config
-/// \param par
-/// \return
-template<typename T, const ConfigPollard<T> &config>
-uint64_t ThreadPollard(void *par) {
-	DecodingInstance *params = (DecodingInstance *)par;
-	using lT              = LogTypeTemplate<config.l>;
+	// `KernelPollard` counts the weight with `__popc`
+	using T = uint32_t;
+	constexpr static uint32_t Hwidth = (n-k+31u)/32u;
+	constexpr static uint32_t tpb    = 256;
+	constexpr static uint32_t blocks = (config.nr_steps + tpb - 1u)/tpb;
+	static_assert(kl <= tpb);
 
-	// CPU stuff, allocate all needed variables/matrices.
-	mzd_t *e            = mzd_init(1, config.n);
-	mzd_t *wH           = matrix_init(config.n-config.k, config.n+1);
-	mzd_t *tmp          = matrix_concat(nullptr, params->A, params->syndromT);
-	mzd_copy(wH, tmp);
-	mzd_free(tmp);
-	mzd_t *wHT          = mzd_init(wH->ncols, wH->nrows);
-	mzd_t *H            = mzd_init(config.n-config.k, config.kl_length+1);  // plus 1 for the syndrome
-	mzd_t *HT           = mzd_init(H->ncols, H->nrows);
-	mzd_t *iHT          = mzd_init(config.k, config.l);
-	// k \times l matrix containing only the `l` part of the transposed parity check matrix
+	T *dHT = nullptr, *dSol = nullptr;
+	l_type *dlHT = nullptr;
+	uint32_t *dCompare = nullptr;
+	curandState *dState = nullptr;
+	std::vector<T> hHT;
 
-	// current permutation of the parity check matrix
-	mzp_t *permutation  = mzp_init(config.n);
-
-	uint32_t Compare = 0, *dCompare = nullptr;
-	checkCudaErrors(cudaMalloc(&dCompare, sizeof(uint32_t)));
-	checkCudaErrors(cudaMemcpy(dCompare, &Compare, sizeof(uint32_t), cudaMemcpyHostToDevice));
-
-	// parity check matrix in the gpu.
-	// NOTE: The parity check matrix on the gpu is probably based on `uint32_t` limbs, whereas the M4RI library
-	//      is based on `uint64_t` limbs. We need do take care of this by copy only row by row to the
-	//      graphic card.
-	// NOTE: The parity check matrix consists of n+1 columns. We need the last columns to append the syndrome,
-	//      to apply the gaussian elimination to it.
-	// BUG: I waste some limbs by simply allocating 2*limb_in_m4ri.
-	T* pdHT;
-	// only the last `l` bit of the parity check matrix, extracted to fastly compute matches on `l` bits.
-	lT *pdiHT;  //
-	checkCudaErrors(cudaMalloc(&pdHT,  config.gpu_matrix_width * config.cpu_matrix_rows * sizeof(T)));
-	checkCudaErrors(cudaMalloc(&pdiHT, config.iHwidth * config.cpu_matrix_rows * sizeof(lT)));
-
-	// just set the syndrome to point to the last column (row in this case, because the matrix is transposed)
-	// of the parity check matrix.
-	T* pdsT                 = &pdHT[config.cpu_gpu_matrix_factor * (config.cpu_matrix_rows-1) * config.cpu_matrix_width];
-
-	// Allocate the output error.
-	thrust::device_vector<T> de(config.cpu_gpu_matrix_factor *params->A->width);
-	T* pde                  = thrust::raw_pointer_cast(de.data());
-
-	// timing stuff
-	cudaEvent_t start, stop;
-	cudaEventCreate(&start); cudaEventCreate(&stop);
-	float kernel_runtime = 0., total_kernel_runtime = 0.;
-	double time = (double)clock();
-	uint64_t loops = 0;
-
-	customMatrixData *matrix_data = init_matrix_data(config.n);
-
-	// cuda rng stuff
-	curandState * dState;
-	const uint64_t seed = rand();
-	
-	// init rngs.
-	checkCudaErrors(cudaMalloc(&dState, params->tpb * sizeof(curandState)));
-	InitRandomNumberGenerator<<<1, params->tpb>>>(dState, seed);
-
-	DEBUG_MACRO(checkCudaErrors(cudaPeekAtLastError()));
-	DEBUG_MACRO(checkCudaErrors(cudaDeviceSynchronize()));
-
-	// as long, we didn't find anything lets run it.
-	while (!Compare && loops < config.loops) {
-		loops += 1;
-
-		// apply the gaussian elimination
-		//matrix_create_random_permutation(wH, wHT, permutation);
-		//matrix_echelonize_partial_plusfix(wH, config.m4ri_k, config.n-config.k,
-		//		matrix_data, 0, config.n-config.k, 0, permutation);
-
-		matrix_echelonize_partial_plusfix_opt_onlyc
-			<config.n, config.k, config.l, config.gaus_c>
-			(wH, wHT, config.m4ri_k, config.n - config.k - config.l,
-			 matrix_data, permutation);
-
-		mzd_submatrix(H, wH, 0, config.n-config.k, config.n-config.k, config.n+1);
-		matrix_transpose(HT, H);
-		mzd_submatrix(iHT, HT, 0, config.n-config.k-config.l, config.k, config.n-config.k);
-		// end of the gaussian elimination phase
-
-		// copy the transposed partial parity check matrix to the gpu
-		MatrixToCuda<T>(pdHT, HT);
-		DEBUG_MACRO(checkCudaErrors(cudaPeekAtLastError()));
-		DEBUG_MACRO(checkCudaErrors(cudaDeviceSynchronize()));
-
-		// same as above only for the `l` part
-		MatrixToCudaReduce<lT>(pdiHT, iHT, config.iHwidth);
-		DEBUG_MACRO(checkCudaErrors(cudaPeekAtLastError()));
-		DEBUG_MACRO(checkCudaErrors(cudaDeviceSynchronize()));
-
-		// also extract the syndrome
-		lT iSyndrom = exctract_l_bit<lT, config.n, config.k, config.l>(wH);
-
-		//mzd_print(wH);
-		//mzd_print(HT);
-		//print_matrix<T><<<1,1>>>(pdHT, k+1, config.gpu_matrix_width);
-		//print_matrix<T><<<1,1>>>(pdiHT, k, config.iHwidth);
-		//print_matrix<T><<<1,1>>>(pdsT, 1, config.gpu_matrix_width);
-		//std::cout << "\n" << std::flush;
-		//std::cout << iSyndrom << " iSyndrom\n";
-		//break;
-
-		kernel_runtime = 0.;
-		cudaEventRecord(start);
-
-		// start the actual kernel
-		KernelPollard<T, lT,
-		              config.n, config.k, config.w, config.p, config.l,
-		              config.gpu_matrix_width, config.iHwidth, config.llimbpos,
-		              config.bijection, config.stern, config.nr_iters>
-		        <<<params->blocks, params->tpb>>>
-		        (pde, pdHT, pdiHT, pdsT, iSyndrom, dState, dCompare);
-
-		// simple error checking.
-		DEBUG_MACRO(checkCudaErrors(cudaPeekAtLastError()));
-		DEBUG_MACRO(checkCudaErrors(cudaDeviceSynchronize()));
-
-		// this is needed to check how much time was spend on the gpu compared
-		// to the gpu.
-		checkCudaErrors(cudaEventRecord(stop));
-		checkCudaErrors(cudaEventSynchronize(stop));
-		checkCudaErrors(cudaEventElapsedTime(&kernel_runtime, start, stop));
-		total_kernel_runtime += kernel_runtime;
-
-		// copy back the `is a solution found flag`
-		// OPTIMIZE: Instead of checking this every loop, let the algorithm run for a few loops,
-		// check then if we found the solution. This ca be done, because once set. Wow it made it slower
-		checkCudaErrors(cudaMemcpy(&Compare, dCompare, sizeof(bool), cudaMemcpyDeviceToHost));
-		checkCudaErrors(cudaDeviceSynchronize());
-
-		// Check if we found the solution
-		if (Compare) {
-			// TODO put everything into custom function to reduce i cache misses
-			// apply back perm
-			mzd_t *tmpe = mzd_init(1, n);
-			CudaToMatrix<T>(tmpe, de);
-			checkCudaErrors(cudaDeviceSynchronize());
-
-			for (uint32_t i = 0; i < n; i++) {
-				mzd_write_bit(e, 0, permutation->values[i], mzd_read_bit(tmpe, 0, i));
-			}
-			mzd_free(tmpe);
-		}
-
-		// print every X loops a status update of the algorithm
-		if ((loops%config.print_loops) == 0) {
-			config.print_loop(loops, ((double)clock() -  time)/CLOCKS_PER_SEC, total_kernel_runtime/1e3);
-		}
+	cuPollard() noexcept : Base(), hHT((kl+1u)*Hwidth) {
+		checkCudaErrors(cudaMalloc(&dHT, hHT.size()*sizeof(T)));
+		checkCudaErrors(cudaMalloc(&dlHT, kl*sizeof(l_type)));
+		checkCudaErrors(cudaMalloc(&dSol, 2*p*sizeof(T)));
+		checkCudaErrors(cudaMalloc(&dCompare, sizeof(uint32_t)));
+		checkCudaErrors(cudaMalloc(&dState, blocks*tpb*sizeof(curandState)));
+		InitRandomNumberGenerator<<<blocks, tpb>>>(dState, rng());
+		checkCudaErrors(cudaGetLastError());
 	}
 
+	~cuPollard() noexcept {
+		cudaFree(dHT); cudaFree(dlHT); cudaFree(dSol);
+		cudaFree(dCompare); cudaFree(dState);
+	}
 
-	config.print_loop(loops, ((double)clock() -  time)/CLOCKS_PER_SEC, total_kernel_runtime/1e3);
-#ifdef EXPECTED_PERMUTATIONS
-	const uint64_t frac = uint64_t(EXPECTED_PERMUTATIONS)/uint64_t(loops);
-	const uint64_t frac_time128 = frac * time;
-	const uint64_t frac_time = uint64_t(frac_time128);
-	std::cout << ", exptime: " << frac_time << "s";
-#endif
-	
-	std::cout << "\n";
-	bool ret = checkCorrectness(e, params->A, params->syndromT, config.w);
+	// same as `Pollard::run`, but `walk` is replaced by `KernelPollard`
+	uint64_t run() noexcept {
+		ISD::reset();
+		uint32_t compare = 0;
+		checkCudaErrors(cudaMemcpy(dCompare, &compare, sizeof(uint32_t), cudaMemcpyHostToDevice));
 
-	// CPU
-	mzd_free(wH);
-	mzd_free(wHT);
-	mzd_free(HT);
-	mzd_free(iHT);
-	mzp_free(permutation);
-	mzd_free(e);
+		while (not_found && loops < isd.loops) {
+			ISD::step();
+			ISD::template extract_lHT<l_type>(lHT);
+			ISD::template extract_pHT<T>(hHT.data());
+			// syndrome as last row
+			cryptanalysislib::memcpy(hHT.data() + kl*Hwidth, (const T *)ws.ptr(), Hwidth);
 
-	checkCudaErrors(cudaFree(dCompare));
-	checkCudaErrors(cudaFree(pdHT));
-	checkCudaErrors(cudaFree(pdiHT));
+			checkCudaErrors(cudaMemcpy(dHT, hHT.data(), hHT.size()*sizeof(T), cudaMemcpyHostToDevice));
+			checkCudaErrors(cudaMemcpy(dlHT, lHT, kl*sizeof(l_type), cudaMemcpyHostToDevice));
+			KernelPollard<T, l_type, n, k, w, p, l, Hwidth, 1, 0, config.isomorhism, false, 1>
+			        <<<blocks, tpb>>>(dSol, dHT, dlHT, dHT + kl*Hwidth, l_type(syndrome), dState, dCompare);
+			checkCudaErrors(cudaGetLastError());
+			checkCudaErrors(cudaMemcpy(&compare, dCompare, sizeof(uint32_t), cudaMemcpyDeviceToHost));
 
-	return loops;
-}
+			if (compare) {
+				T sol[2*p];
+				checkCudaErrors(cudaMemcpy(sol, dSol, 2*p*sizeof(T), cudaMemcpyDeviceToHost));
+				for (uint32_t i = 0; i < 2*p; ++i) {
+					solutions[i] = sol[i];
+				}
+				not_found = false;
+			}
+		}
+
+		if (!not_found) {
+			Base::reconstruct();
+		}
+		return loops;
+	}
+};
 
 
-template<typename T, const ConfigPollard<T> &config>
-uint64_t CudaPollard() {
-	srand(time(nullptr));
-	random_seed(rand());
-	
-	DecodingInstance params{h, s, n, k, config.nr_walks};
-	config.print();
-	params.print();
-	const uint64_t loops = ThreadPollard<T, config>(&params);
-
-	return loops;
-}
 #endif
