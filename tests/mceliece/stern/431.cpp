@@ -60,7 +60,7 @@ TEST(SternIM, t431t1p2c20) {
 TEST(SternMO, t431t1p2) {
 	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=2,.l=0,.c=0,.threads=1};
 	// n-k = 86: r = 2 limbs of 43 bits
-	static constexpr ConfigSternMO config{isdConfig, 2, 50, 10, 43};
+	static constexpr ConfigSternMO config{isdConfig, 2, 50, 15, 43};
 
 	SternMO<isdConfig, config> stern{};
 	stern.from_string(h, s);

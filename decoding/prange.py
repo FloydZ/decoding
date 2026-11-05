@@ -2,85 +2,29 @@
 
 from subprocess import Popen, PIPE, STDOUT
 from pysat.card import *
-import urllib.request
 import random
 try:
     from .matrix import Matrix
+    from .challenge import get_decodingchallenge
 except ImportError:  # executed as a script
     from matrix import Matrix
+    from challenge import get_decodingchallenge
 # from optimize import *
 
 
-def parse_decodingchallenge(lines): 
+def run_cryptominisat(file: str = "out.cnf", seconds: int=30, sol: str = "out.sol"):
     """
-    TODO import from optimize.py, but currently I dont want to import CE
-    """
-    q = 2
-    ctr = 1 #f.readline()        # `# n`
-    n = int(lines[ctr])
-    ctr += 2 # jump over next comment
-    tmp = int(lines[ctr]) # `# seed`(GO) or `k`(SD) or # w (QC)
-    ctr += 2
-    if "vector" in lines[ctr-1]: # QC setting
-        k = n // 2
-        w = tmp
-    else: # GO or SD
-        w = int(lines[ctr])
-        ctr += 2
-        if len(lines[ctr]) <= 3: # ternary
-            q = 3
-            k = w
-            w = int(lines[ctr])
-            ctr += 2
-        else:
-            if tmp == 0: # SD
-                k = n // 2
-            else: # GO 
-                k = tmp
-    assert k > 0 
-    assert w > 0 
-    assert n > 0 
-   
-    H = []
-    while lines[ctr][0] != '#':
-        H.append(lines[ctr])
-        ctr += 1 
-    
-    # `# s^transpose` was already consumed
-    ctr += 1
-    s = lines[ctr].strip("\n")
-    H2 = []
-    # append the identity matrix.
-    for i in range(int(n)-k):
-        H2.append("0"*i + "1" + "0"*(int(n)-k-i-1))
-    
-    for e in H:
-        H2.append(e.strip("\n"))
-    return n, k, w, q, "".join(H2).strip("\n"), s
-
-
-def get_decodingchallenge(url: str):
-    with urllib.request.urlopen(url) as f:
-        lines = f.readlines()
-        lines = [line.decode("utf-8").strip("\n") for line in lines]
-        return parse_decodingchallenge(lines)
-
-
-def test_get_decodingchallenge():
-    url = "https://decodingchallenge.org/Challenges/SD/SD_100_0"
-    print(get_decodingchallenge(url))
-
-
-def run_cryptominisat(file: str = "out.cnf", seconds: int=30):
-    """
+    writes the output of cryptominisat into `sol`
     :return true/false if found or not
     """
-    cmd = ["cryptominisat5", "--maxtime", str(seconds), file] 
+    cmd = ["cryptominisat5", "--maxtime", str(seconds), file]
     p = Popen(cmd, stdin=PIPE, stdout=PIPE, stderr=STDOUT)
-    p.wait()
-    s = str(p.stdout.read())
-    print(s)
-    return p.returncode == 0
+    # NOTE: `communicate` instead of `wait`, which can deadlock on a full pipe
+    out, _ = p.communicate()
+    with open(sol, "w") as f:
+        f.write(out.decode("utf-8"))
+    # NOTE: the exit code is 10 for SAT, 20 for UNSAT and 15 for unknown
+    return p.returncode == 10
 
 
 def parse_solution(n: int, file="out.sol") -> Matrix:
@@ -149,7 +93,11 @@ def random_permutation(H: Matrix, P):
         P[i], P[pos] = P[pos], P[i]
 
 
-def prange(H: Matrix, S: Matrix, w: int, file="out.cnf"):
+def prange(H: Matrix, S: Matrix, w: int, file="out.cnf", sol="out.sol"):
+    """
+    NOTE: permutes the columns of `H`
+    :return the error vector e with H*e^T = S^T
+    """
     n = H.ncols
     nk = H.nrows
     k = n - nk
@@ -158,27 +106,44 @@ def prange(H: Matrix, S: Matrix, w: int, file="out.cnf"):
     seconds = 30
     while 1:
         random_permutation(H, P)
-        H.gauß()
-        #H.print()
-        
-        clauses = [[str(i+1) for i in range(k) if row[nk + i] !=0 ] for row in H.data]
-        out = ""
-        for i, c in enumerate(clauses):
-            out += "x" + " ".join(c[:-1])
-            if S.data[0][i]: out += " " + c[-1] + " 0\n"
-            else: out += " -" + c[-1] + " 0\n"
-        
-        
+
+        # NOTE: the syndrome must be transformed as well, hence `[H | S^T]`
+        A = Matrix(nk, n + 1, H.q)
+        for i in range(nk):
+            A.data[i] = H.data[i] + [S.data[0][i]]
+        if A.gauß(nk) < nk:
+            continue
+
+        # A = [I | H' | S'], every row is a xor clause on e2: H'_i * e2 = S'_i
+        out, nr_clauses, solvable = "", 0, True
+        for row in A.data:
+            lits = [str(i+1) for i in range(k) if row[nk + i] != 0]
+            if not lits:
+                # 0 = S'_i
+                solvable &= row[n] == 0
+                continue
+            # NOTE: negating a literal flips the parity
+            if row[n] == 0:
+                lits[-1] = "-" + lits[-1]
+            out += "x" + " ".join(lits) + " 0\n"
+            nr_clauses += 1
+        if not solvable:
+            continue
+
         cnf = CardEnc.atmost(lits=list(range(1, k+1)), bound=w)
-        cnf.to_file(file)
-        with open(file, 'r') as original:
-            data = original.read()
-        with open(file, 'w') as modified:
-            modified.write(out + data)
+        with open(file, 'w') as f:
+            f.write("p cnf {} {}\n".format(max(cnf.nv, k), nr_clauses + len(cnf.clauses)))
+            f.write(out)
+            for c in cnf.clauses:
+                f.write(" ".join(str(a) for a in c) + " 0\n")
 
-        run_cryptominisat(file, seconds)
-
-    # TODO reconstruct
+        if run_cryptominisat(file, seconds, sol):
+            # reconstruct: e = (0 | e2), then undo the permutation
+            e2 = parse_solution(k, sol)
+            e = Matrix(1, n, H.q)
+            for i in range(k):
+                e.data[0][P[nk + i]] = e2.data[0][i]
+            return e
 
 
 if __name__ == "__main__":
@@ -189,4 +154,8 @@ if __name__ == "__main__":
     S = Matrix(1, n-k, 2).from_string(s)
     #print(n,k,w,q)
     #assert(check_solution(H, S, "out.sol"))
-    prange(H, S, w)
+    # NOTE: `prange` permutes the columns of its argument
+    e = prange(H.copy(), S, w)
+    e.print()
+    s = (H*e.transpose()).transpose()
+    assert s.data == S.data

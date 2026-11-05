@@ -112,49 +112,16 @@ public:
 	Value value_solution_to_recover;
 	Label label_solution_to_recover;
 
-	// TODO move
-	/// compress in the case of non packed data containers
-	/// e.g. removes all the zeros from the containers
-	constexpr inline static __uint128_t Compress(const Label &label) noexcept {
-		/// some security measurements:
-		if constexpr (qbits*l > 128) {
-			assert(false && "not implemented");
-		}
-
-		/// easy case
-		if constexpr (packed) {
-			constexpr __uint128_t mask = qbits*l == 128 ? ~__uint128_t(0) : (__uint128_t(1ull) << (qbits*l)) - __uint128_t(1ull);
-			using TT = LogTypeTemplate<qbits*l>;
-
-			/// NOTE: that we fetch the first 128bits (and not the last, where we would assume
-			/// normally the l bit window), as we assume we swapped all rows within the parity
-			/// check matrix. Therefor the last `l` bit of every syndrome are now the first.
-			const TT a = *((TT *)label.ptr());
-			const __uint128_t aa = a;
-			return aa&mask;
-		}
-
-		// important to init with zero here.
-		__uint128_t ret = 0;
-
-		#pragma unroll
-		for (uint32_t i = 0u; i < l; ++i) {
-			ret ^= (__uint128_t(label.get(i)) << (qbits*i));
-		}
-
-		return ret;
-	}
-
 	/// this extractor is needed, to be able to search on the second
 	/// list for elements, which are equal zero summed together
 	/// \return the negative of label[lower, q*l*nr_window) shifted to zero
 	constexpr inline static __uint128_t NegateCompress(const Label &label) noexcept {
 		if constexpr (q == 2) {
-			return Compress(label);
+			return ISD::template Compress<l>(label);
 		}
 		Label tmp = label;
 		tmp.neg();
-		return Compress(tmp);
+		return ISD::template Compress<l>(tmp);
 	}
 
 	/// \return the `window`-th block of `l` coordinates of `label`, compressed
@@ -163,7 +130,7 @@ public:
 	template<const uint32_t window>
 	constexpr inline static l_type CompressWindow(const Label &label) noexcept {
 		if constexpr (window == 0) {
-			return Compress(label);
+			return ISD::template Compress<l>(label);
 		}
 
 		static_assert(qbits*l <= sizeof(l_type)*8u);
@@ -212,8 +179,8 @@ public:
 		hm1->clear();
 
 		/// this call simply inits the the list
-		G.template run <HM, decltype(Compress), std::nullptr_t>
-				(L1, nullptr, 0, 0, tid, hm1, &Compress);
+		G.template run <HM, decltype(ISD::template Compress<l>), std::nullptr_t>
+				(L1, nullptr, 0, 0, tid, hm1, &ISD::template Compress<l>);
 	}
 
 

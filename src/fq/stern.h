@@ -56,45 +56,13 @@ public:
 	Generator G;
 	List *L1, *L2;
 
-	/// compress in the case of non packed data containers
-	/// e.g. removes all the zeros from the containers
-	constexpr inline static __uint128_t Compress(const Label &label) noexcept {
-		/// some security measurements:
-		if constexpr (qbits*l > 128) {
-			assert(false && "not implemented");
-		}
-
-		/// easy case
-		if constexpr (packed) {
-			constexpr __uint128_t mask = qbits*l == 128 ? ~__uint128_t(0) : (__uint128_t(1ull) << (qbits*l)) - __uint128_t(1ull);
-			using TT = LogTypeTemplate<qbits*l>;
-
-			/// NOTE: that we fetch the first 128bits (and not the last, where we would assume
-			/// normally the l bit window), as we assume we swapped all rows within the parity
-			/// check matrix. Therefor the last `l` bit of every syndrome are now the first.
-			const TT a = *((TT *)label.ptr());
-			const __uint128_t aa = a;
-			return aa&mask;
-		}
-
-		// important to init with zero here.
-		__uint128_t ret = 0;
-
-		#pragma unroll
-		for (uint32_t i = 0u; i < l; ++i) {
-			ret ^= (__uint128_t(label.get(i)) << (qbits*i));
-		}
-
-		return ret;
-	}
-
 	/// this extractor is needed, to be able to search on the second
 	/// list for elements, which are equal zero summed together
 	/// \return the negative of label[lower, q*l*nr_window) shifted to zero
 	constexpr inline static __uint128_t NegateCompress(const Label &label) noexcept {
 		Label tmp = label;
 		tmp.neg();
-		return Compress(tmp);
+		return ISD::Compress(tmp);
 	}
 
 
@@ -134,15 +102,15 @@ public:
 		hm->clear();
 
 		/// this call simply inits the the list
-		G.template run <HM, decltype(Compress), std::nullptr_t>
-				(L1, L2, enum_offset, 0, tid, hm, &Compress);
+		G.template run <HM, decltype(ISD::template Compress<l>), std::nullptr_t>
+				(L1, L2, enum_offset, 0, tid, hm, &ISD::template Compress<l>);
 	}
 
 	void find_collisions(const uint32_t tid) {
 		const size_t start = L2->start_pos(tid);
 		const size_t end = L2->end_pos(tid);
 
-		Label tmp;
+		Label tmp, tmp2;
 		for (size_t i = start; i < end; ++i) {
 			l_type data = NegateCompress(L2->at(i).label);
 			data = Label::template add_T<l_type>(data, syndrome);
@@ -150,12 +118,15 @@ public:
 			/// search in HM
 			HM_LoadType load;
 			IndexType pos = hm->find(data, load);
+			if (load == 0) {
+				continue;
+			}
+
+			Label::sub(tmp2, ws, L2->at(i).label);
 			for (uint64_t j = pos; j < pos + load; j++) {
 				const IndexType index = hm->ptr(j)[0];
 
-				/// TODO not really nice
-				Label::add(tmp, L1->at(index).label, L2->at(i).label);
-				Label::sub(tmp, ws, tmp);
+				Label::sub(tmp, tmp2, L1->at(index).label);
 
 				// std::cout << std::endl;
 				// L2->at(i).label.print();

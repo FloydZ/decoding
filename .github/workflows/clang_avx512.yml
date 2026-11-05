@@ -1,0 +1,39 @@
+name: clang_avx512
+
+on: [push]
+
+jobs:
+  build:
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(vars.CLANG_BUILD_MATRIX) }}
+
+    name: ${{ matrix.os }}, clang-${{ matrix.version }}, ${{ matrix.build_type }} avx512
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        submodules: recursive
+
+    - name: Install Software
+      run: |
+        sudo apt-get update -y
+        sudo apt-get install -y cmake clang-${{matrix.version }} libomp-${{matrix.version}}-dev libgtest-dev
+
+    - name: Configure CMake
+      env:
+        CXX: clang++-${{ matrix.version }}
+        CC: clang-${{ matrix.version }}
+      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{matrix.build_type}} -DENABLE_AUTO_OPTIMIZATIONS=OFF -DCMAKE_C_FLAGS="-DUSE_AVX2 -mavx2 -mavx -mbmi2 -mbmi -mfma -DUSE_AVX512F -mavx512f -mavx512vl -mavx512cd -mavx512dq -mavx512bw -mavx512ifma -mavx512vbmi -mavx512vbmi2 -mavx512bitalg -mavx512vpopcntdq -mavx512vnni -mvaes -mvpclmulqdq -mgfni" -DUSE_AVX2=ON -DUSE_AVX512=ON
+
+    - name: Build
+      env:
+        CXX: clang++-${{ matrix.version }}
+        C: clang-${{ matrix.version }}
+      run: cmake --build ${{github.workspace}}/build --parallel 4
+
+    - name: Test
+      working-directory: ${{github.workspace}}/build
+      run: ctest -C Debug -VV --timeout 1200 -j 4

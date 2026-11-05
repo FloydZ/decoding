@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "decoding"
+version = "0.0.1"
+description = "Information set decoding (ISD) parameter optimization and helpers"
+readme = "README.md"
+license = { text = "GPL-2.0" }
+authors = [{ name = "Floyd Zweydinger", email = "zweydfg8+github@rub.de" }]
+requires-python = ">=3.10"
+dependencies = [
+    "cryptographic_estimators",
+    "python-sat",
+]
+
+[project.urls]
+Homepage = "https://github.com/FloydZ/decoding"
+
+[tool.setuptools]
+# the root also holds bench/, deps/, src/, tests/ (C++), so no auto discovery
+packages = ["decoding"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: compiles and runs the C++ code",
+]

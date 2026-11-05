@@ -38,6 +38,19 @@ TEST(BJMM, t431t1p2c20) {
 	EXPECT_EQ(bjmm.correct(), true);
 }
 
+TEST(BJMM, t431t1p2simd) {
+	constexpr uint32_t bucketsize1 = 16;
+	constexpr uint32_t bucketsize2 = 8;
+
+	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=1,.l=16,.c=0,.threads=1,.simd=true};
+	static constexpr ConfigBJMM config{isdConfig, 2, bucketsize1, bucketsize2};
+
+	BJMM<isdConfig, config> bjmm{};
+	bjmm.from_string(h, s);
+	bjmm.run();
+	EXPECT_EQ(bjmm.correct(), true);
+}
+
 // TODO
 //TEST(EB, t431t1p2) {
 //	constexpr uint32_t bucketsize1 = 16;

@@ -135,10 +135,20 @@ public:
 	CollisionHashMap<configEnum, HM1> *cEnum;
 	CollisionHashMapD2<configEnumD2, HM1, HM2> *cEnumD2;
 
+	/// simd type of `compute_finale_list`, e.g. `uint32x16_t`
+	using simd_type = uint32x8_t;
+	constexpr static uint32_t simd_lanes = simd_type::LIMBS;
+	static_assert(simd_lanes <= 16);
+	/// lane indices, loaded into a `simd_type`
+	alignas(64) constexpr static uint32_t simd_lane_index[16] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15};
+
 	/// NOTE: that we increase the size with about one bucket size to make sure that we can fully insert a bucket
 	// NOTE: `max + 1` suffices (`f2` flushes at `max`, a found solution skips the reset)
-	constexpr static size_t final_list_real_max_size = (final_list_max_size + HM2_bucketsize*HM2_bucketsize) + ((8u - ((final_list_max_size + HM2_bucketsize*HM2_bucketsize)%8u))%8u);
-	alignas(256) std::array<uint16_t[4*p], final_list_real_max_size> final_list;
+	// NOTE: a multiple of `simd_lanes`, the simd check pads the list
+	constexpr static size_t final_list_real_max_size = (final_list_max_size + HM2_bucketsize*HM2_bucketsize) + ((simd_lanes - ((final_list_max_size + HM2_bucketsize*HM2_bucketsize)%simd_lanes))%simd_lanes);
+	// NOTE: `+16`, the simd check gathers 4 bytes per 2 byte row index and `f2`
+	// 	scatters 8 entries, also after a found solution (which skips the reset)
+	alignas(256) std::array<uint16_t[4*p], final_list_real_max_size + 16> final_list;
 
 	BJMM() noexcept {
 		ISD::expected_loops = config.compute_loops();
@@ -165,9 +175,69 @@ public:
 
 	/// takes the indices from `final_list` and checks if they are a full
 	/// collision
-	/// NOTE: without AVX
-	/// TODO: simd
+	/// NOTE: if `simd`, `simd_lanes` entries are checked at once
 	bool compute_finale_list() noexcept {
+		if constexpr (simd) {
+			static_assert(sizeof(l_type) == sizeof(uint32_t));
+			if (final_list_current_size == 0) {
+				return false;
+			}
+
+			// pad to a multiple of `simd_lanes` by repeating the last entry
+			const size_t padded_size = (final_list_current_size + simd_lanes - 1u) / simd_lanes * simd_lanes;
+			assert(padded_size <= final_list_real_max_size);
+			for (size_t i = final_list_current_size; i < padded_size; i++) {
+				// NOTE: the last argument is the number of elements, not bytes
+				cryptanalysislib::memcpy(final_list[i], final_list[final_list_current_size - 1u], 4*p);
+			}
+
+			const simd_type filter_mask = simd_type::set1(wt_limit + 1u);
+			const simd_type mul_mask    = simd_type::set1(NR_HT_T_LIMBS);
+			const simd_type low16_mask  = simd_type::set1(0xFFFFu);
+			// offset of the row index `j` of lane `c` is `c*4*p + j` (in uint16_t)
+			const simd_type entry_offset = simd_type::load(simd_lane_index) * simd_type::set1(4*p);
+			const uint32_t *ws32 = (const uint32_t *)ws.ptr();
+			for (size_t cindex = 0; cindex < padded_size; cindex += simd_lanes) {
+				// row offsets into `pHT`
+				const uint16_t *entries = final_list[cindex];
+				simd_type rows[4*p];
+				#pragma unroll
+				for (uint32_t j = 0; j < 4*p; j++) {
+					rows[j] = (simd_type::template gather<2>(entries + j, entry_offset) & low16_mask) * mul_mask;
+				}
+
+				simd_type wt = simd_type::set1(0u);
+				uint64_t wt_ = 0;
+				for (uint32_t i = 0; i < NR_HT_T_LIMBS; i++) {
+					simd_type climb = simd_type::set1(ws32[i]);
+					#pragma unroll
+					for (uint32_t j = 0; j < 4*p; j++) {
+						climb = climb ^ simd_type::template gather<sizeof(l_type)>(pHT + i, rows[j]);
+					}
+
+					wt = wt + simd_type::popcnt(climb);
+					wt_ = filter_mask > wt;
+
+					// early exit, all lanes are too heavy
+					if (wt_ == 0) { break; }
+				}
+
+				if (unlikely((wt_ != 0) && not_found)) {
+					not_found = false;
+					cycles = cpucycles() - cycles;
+					const uint32_t pos = __builtin_ctzll(wt_);
+					for (uint32_t j = 0; j < 4*p; ++j) {
+						solutions[j] = final_list[cindex + pos][j];
+					}
+
+					return true;
+				}
+			}
+
+			final_list_current_size = 0;
+			return false;
+		}
+
 		// go through the list
 		for (size_t cindex = 0; cindex < final_list_current_size; cindex++) {
 			uint16_t *rows = final_list[cindex];
@@ -269,19 +339,48 @@ public:
 				hm2->insert(a>>l1, V2::create(a, index1));
 			};
 
+			/// NOTE: the simd version of `cEnumD2` passes `uint32_t` rows: row s
+			/// 	of collision c is `index1[s*8 + c]` (2p rows of `hm2`) and
+			/// 	`index2[s*8 + c]` (2p rows). Otherwise `index1` are all 4p rows.
 			auto f2 = [&, this](const l_type a1, const l_type a2,
-								const uint16_t *index1, const uint16_t *index2,
+								const auto *index1, const auto *index2,
 								const uint32_t nr_cols) __attribute__((always_inline)) {
-			  	assert(bEnum->check_hashmap2(syndrome, index1, 4*p, l));
-				(void) index2;
-				(void) nr_cols;
 				(void) a1;
 				(void) a2;
 
-				for (uint32_t i = 0; i < 4*p; ++i) {
-					final_list[final_list_current_size][i] = index1[i];
+				if constexpr (sizeof(*index1) == sizeof(uint32_t)) {
+#ifndef NDEBUG
+					for (uint32_t c = 0; c < nr_cols; ++c) {
+						uint16_t rows[4*p];
+						for (uint32_t s = 0; s < 2*p; ++s) {
+							rows[s]       = index1[s*8 + c];
+							rows[2*p + s] = index2[s*8 + c];
+						}
+						assert(bEnum->check_hashmap2(this->syndrome, rows, 4*p, l));
+					}
+#endif
+					// NOTE: two 16 bit rows are one 32 bit word of an entry
+					const uint32x8_t entry = uint32x8_t::load(simd_lane_index) * uint32x8_t::set1(2*p);
+					uint32_t *base = (uint32_t *)final_list[final_list_current_size];
+
+					#pragma unroll
+					for (uint32_t s = 0; s < p; s++) {
+						const uint32x8_t left  = uint32x8_t::load(index1 + 16*s) | (uint32x8_t::load(index1 + 16*s + 8) << 16u);
+						const uint32x8_t right = uint32x8_t::load(index2 + 16*s) | (uint32x8_t::load(index2 + 16*s + 8) << 16u);
+						uint32x8_t::template scatter<4>(base + s,     entry, left);
+						uint32x8_t::template scatter<4>(base + p + s, entry, right);
+					}
+					final_list_current_size += nr_cols;
+				} else {
+				  	assert(bEnum->check_hashmap2(this->syndrome, index1, 4*p, l));
+					(void) index2;
+					(void) nr_cols;
+
+					for (uint32_t i = 0; i < 4*p; ++i) {
+						final_list[final_list_current_size][i] = index1[i];
+					}
+					final_list_current_size += 1;
 				}
-				final_list_current_size += 1;
 
 				if (final_list_current_size >= final_list_max_size) {
 					  compute_finale_list();
@@ -290,7 +389,6 @@ public:
 				return false;
 			};
 
-			constexpr bool simd = false;
 			bEnum->step(0, tid, simd);
 
 			l_type iT1 = 0;

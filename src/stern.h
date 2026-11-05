@@ -113,10 +113,19 @@ public:
 	EnumHashMap<configEnum, HM> *bEnum;
 	CollisionHashMap<configEnum, HM> *cEnum;
 
+	/// simd type of `compute_finale_list_simd`, e.g. `uint32x16_t`
+	using simd_type = uint32x8_t;
+	constexpr static uint32_t simd_lanes = simd_type::LIMBS;
+	static_assert(simd_lanes <= 16);
+	/// lane indices, loaded into a `simd_type`
+	alignas(64) constexpr static uint32_t simd_lane_index[16] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15};
+
 	/// NOTE: that we increase the size with about one bucket size to make sure that we can fully insert a bucket
-	constexpr static size_t final_list_real_max_size = (final_list_max_size + bucketsize*bucketsize) + ((8u - ((final_list_max_size + bucketsize*bucketsize)%8u))%8u);
-	alignas(256) std::array<uint16_t[p], final_list_real_max_size> final_list_left;
-	alignas(256) std::array<uint16_t[p], final_list_real_max_size> final_list_right;
+	// NOTE: a multiple of `simd_lanes`, the simd check pads the list
+	constexpr static size_t final_list_real_max_size = (final_list_max_size + bucketsize*bucketsize) + ((simd_lanes - ((final_list_max_size + bucketsize*bucketsize)%simd_lanes))%simd_lanes);
+	// NOTE: `+1`, the simd check gathers 4 bytes per 2 byte row index
+	alignas(256) std::array<uint16_t[p], final_list_real_max_size + 1> final_list_left;
+	alignas(256) std::array<uint16_t[p], final_list_real_max_size + 1> final_list_right;
 
 	Stern() noexcept {
 		expected_loops = config.compute_loops();
@@ -203,18 +212,16 @@ public:
 	}
 
 	/// checks for collisions in the final list.
-	/// NOTE: using AVX2, therefore 8 elements are checked simultaneously
+	/// NOTE: `simd_lanes` elements are checked simultaneously
 	bool compute_finale_list_simd() noexcept {
-		// 8 list entries are loaded as 8 x uint32_t, which only works for p == 2
-		static_assert(p == 2);
-		static_assert(sizeof(final_list_left[0]) == sizeof(uint32_t));
+		static_assert(sizeof(l_type) == sizeof(uint32_t));
 		if (final_list_current_size == 0) {
 			return false;
 		}
 
-		// pad the list to a multiple of 8 by repeating the last entry. Otherwise
-		// the last `final_list_current_size % 8` entries are never checked.
-		const size_t padded_size = (final_list_current_size + 7u) & ~size_t(7u);
+		// pad the list to a multiple of `simd_lanes` by repeating the last entry. Otherwise
+		// the last `final_list_current_size % simd_lanes` entries are never checked.
+		const size_t padded_size = (final_list_current_size + simd_lanes - 1u) / simd_lanes * simd_lanes;
 		assert(padded_size <= final_list_real_max_size);
 		for (size_t i = final_list_current_size; i < padded_size; i++) {
 			// NOTE: the last argument is the number of elements, not bytes
@@ -222,62 +229,52 @@ public:
 			cryptanalysislib::memcpy(final_list_right[i], final_list_right[final_list_current_size - 1u], p);
 		}
 
-		uint32x8_t rows1[p], rows2[p];
-		const uint32x8_t filter_mask = uint32x8_t::set1(w - 2*p + 1);
-		const uint32x8_t mul_mask    = uint32x8_t::set1(NR_HT_T_LIMBS);
-		const uint32x8_t low16_mask  = uint32x8_t::set1(0xFFFFu);
+		simd_type rows1[p], rows2[p];
+		const simd_type filter_mask = simd_type::set1(w - 2*p + 1);
+		const simd_type mul_mask    = simd_type::set1(NR_HT_T_LIMBS);
+		const simd_type low16_mask  = simd_type::set1(0xFFFFu);
+		const simd_type zero        = simd_type::set1(0u);
+		// offset of the row index `j` of lane `c` is `c*p + j` (in uint16_t)
+		const simd_type entry_offset = simd_type::load(simd_lane_index) * simd_type::set1(p);
+		// NOTE: `ws.ptr(i)` is the i-th 64 bit limb, `pHT` has 32 bit limbs
+		const uint32_t *ws32 = (const uint32_t *)ws.ptr();
+		// the first `l` coordinates must be zero, see `compute_finale_list`
+		const simd_type l_mask = simd_type::set1((l >= 32u) ? uint32_t(-1) : uint32_t((1u << l) - 1u));
 
-		const uint32x8_t *final_list_left256  = (uint32x8_t *)final_list_left.data();
-		const uint32x8_t *final_list_right256 = (uint32x8_t *)final_list_right.data();
+		for (size_t cindex = 0; cindex < padded_size; cindex += simd_lanes) {
+			const uint16_t *left  = final_list_left[cindex];
+			const uint16_t *right = final_list_right[cindex];
 
-		for (size_t cindex = 0; cindex < padded_size/8; cindex++) {
-			assert(cindex < final_list_left.size());
-
-			const uint32x8_t left  = uint32x8_t::load((uint32_t *)(final_list_left256  + cindex));
-			const uint32x8_t right = uint32x8_t::load((uint32_t *)(final_list_right256 + cindex));
-
-			// NOTE: every entry holds the two 16-bit row indices (the right ones
-			// are global) written by `f`. They are not chase/combination indices.
-			rows1[0] = left & low16_mask;
-			rows1[1] = left >> 16u;
-			rows2[0] = right & low16_mask;
-			rows2[1] = right >> 16u;
-
-			// ignore special case for lowest limb
-			uint32x8_t wt{};
-			int wt_ = 0;
-
+			// NOTE: we need to multiply the offset of the rows, by the number of limbs
+			// in each row.
 			#pragma unroll
-			for (uint16_t i = 0; i < p; ++i) {
-				// NOTE: this is important, but stupid.
-				// we need to multiply the offset of the rows, by the number of limbs
-				// in each row.
-				rows1[i] = rows1[i] * mul_mask;
-				rows2[i] = rows2[i] * mul_mask;
+			for (uint16_t j = 0; j < p; j++) {
+				rows1[j] = (simd_type::template gather<2>(left  + j, entry_offset) & low16_mask) * mul_mask;
+				rows2[j] = (simd_type::template gather<2>(right + j, entry_offset) & low16_mask) * mul_mask;
 			}
 
-			// #pragma unroll
-			for (uint32_t i = 0; i < NR_HT_T_LIMBS; i++) {
-				uint32x8_t climb = uint32x8_t::set1(ws.ptr(i));
+			simd_type wt = zero;
+			uint64_t wt_ = 0, valid = 0;
 
+			for (uint32_t i = 0; i < NR_HT_T_LIMBS; i++) {
+				simd_type climb = simd_type::set1(ws32[i]);
 				const l_type *base_pHT = pHT + i;
 
-				// #pragma unroll
+				#pragma unroll
 				for (uint16_t j = 0; j < p; j++) {
-					const uint32x8_t t11 = uint32x8_t::template gather <sizeof(l_type)>(base_pHT, rows1[j]);
-					const uint32x8_t t21 = uint32x8_t::template gather <sizeof(l_type)>(base_pHT, rows2[j]);
+					const simd_type t11 = simd_type::template gather<sizeof(l_type)>(base_pHT, rows1[j]);
+					const simd_type t21 = simd_type::template gather<sizeof(l_type)>(base_pHT, rows2[j]);
 					climb = climb ^ t11 ^ t21;
 				}
 
-				// sanity check
-				if(i == 0) {
-					assert(((climb.v32[0]) & ((1u << l) - 1u)) == 0);
+				// lanes with a zero `l` window. Stern-IM matches on a different window
+				if (i == 0) {
+					valid = (climb & l_mask) == zero;
 				}
 
 				// popcount
-				const uint32x8_t wtt = uint32x8_t::popcnt(climb);
-				wt = wt + wtt;
-				wt_ = filter_mask > wt;
+				wt = wt + simd_type::popcnt(climb);
+				wt_ = (filter_mask > wt) & valid;
 
 				// if the mask `wt_` is zero, we can do an early exit, because the weight
 				// is already too big, for all elements.
@@ -289,11 +286,12 @@ public:
 			// if we pass this check, we found a global solution
 			if (unlikely((wt_ != 0) && not_found)) {
 				not_found = false;
+				cycles = cpucycles() - cycles;
 
-				const uint32_t pos = __builtin_ctz(wt_);
+				const uint32_t pos = __builtin_ctzll(wt_);
 				for (uint16_t j = 0; j < p; ++j) {
-					solutions[j]     = rows1[j].v32[pos]/NR_HT_T_LIMBS;
-					solutions[p + j] = rows2[j].v32[pos]/NR_HT_T_LIMBS;
+					solutions[j]     = final_list_left[cindex + pos][j];
+					solutions[p + j] = final_list_right[cindex + pos][j];
 				}
 
 				return true;

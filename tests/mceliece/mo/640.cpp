@@ -2,6 +2,8 @@
 
 #include "../challenges/mce640.h"
 #include "stern_mo.h"
+#include "mo_im.h"
+#include "mo.h"
 
 using ::testing::EmptyTestEventListener;
 using ::testing::InitGoogleTest;
@@ -20,6 +22,17 @@ TEST(SternMO, t640t1p2) {
 	stern.from_string(h, s);
 	stern.run();
 	EXPECT_EQ(stern.correct(), true);
+}
+
+TEST(MO, t640t1p2) {
+	static constexpr ConfigISD isdConfig{.n=n,.k=k,.q=2,.w=w,.p=2,.l=12,.c=0,.threads=1};
+	static constexpr ConfigMO config{isdConfig, 2, 10, 2, 1024,
+							true, 2, 100, 32, 12, 0};
+
+	MayOzerov<isdConfig, config> mo{};
+	mo.from_string(h, s);
+	mo.run();
+	EXPECT_EQ(mo.correct(), true);
 }
 
 int main(int argc, char **argv) {

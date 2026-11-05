@@ -50,7 +50,7 @@ struct ConfigISD {
 
 	/// if true only the `packed` versions of the data containers are used
 	const bool packed = true;
-	const bool simd = false; // TODO enable
+	const bool simd = true;
 	const bool parity_row = false; // TODO
 	const bool doom = false; // TODO
 
@@ -352,6 +352,10 @@ public:
 		PCMatrixOrg::mul_transposed(s, A, e);
 		PCMatrix::augment(wA, A, s);
 
+		if constexpr (config.parity_row) {
+			compute_parity_row();
+		}
+
 		e.print();
 		std::cout << "this is the solution vector" << std::endl;
 	}
@@ -363,9 +367,42 @@ public:
 		wA.set(config.w%2u, config.n-config.k, config.n);
 	}
 
+	/// compress in the case of non packed data containers
+	/// e.g. removes all the zeros from the containers
+	template<const uint32_t lprime=config.l>
+	constexpr inline static __uint128_t Compress(const Label &label) noexcept {
+		/// some security measurements:
+		if constexpr (q_bits*lprime > 128) {
+			assert(false && "not implemented");
+		}
+
+		/// easy case
+		if constexpr (packed) {
+			constexpr __uint128_t mask = q_bits*lprime == 128 ? ~__uint128_t(0) : (__uint128_t(1ull) << (q_bits*lprime)) - __uint128_t(1ull);
+			using TT = LogTypeTemplate<q_bits*lprime>;
+
+			/// NOTE: that we fetch the first 128bits (and not the last, where we would assume
+			/// normally the l bit window), as we assume we swapped all rows within the parity
+			/// check matrix. Therefor the last `l` bit of every syndrome are now the first.
+			const TT a = *((TT *)label.ptr());
+			const __uint128_t aa = a;
+			return aa&mask;
+		}
+
+		// important to init with zero here.
+		__uint128_t ret = 0;
+
+		#pragma unroll
+		for (uint32_t i = 0u; i < lprime; ++i) {
+			ret ^= (__uint128_t(label.get(i)) << (q_bits*i));
+		}
+
+		return ret;
+	}
+
     /// one iteration: permute + gaus `wA`, then optionally
     /// \tparam sub extract `H` \tparam swap reverse its rows \tparam transpose into `HT`
-    /// NOTE: always extracts the syndrome `ws`
+    /// NOTE: always extracts the syndrome `ws`, in the same row order as `H`
 	template<const bool transpose=true,
 	         const bool swap=true,
 	         const bool sub=true>
@@ -401,7 +438,14 @@ public:
 			PCSubMatrix::transpose(HT, H);
 		}
 
-		extract_syndrome();
+		if constexpr (swap) {
+			extract_syndrome();
+		} else {
+			// NOTE: the rows of `H` are not swapped, hence neither is the syndrome
+			for (uint16_t i = 0; i < config.n-config.k; i++) {
+				ws.set(wA.get(i, config.n), i);
+			}
+		}
 		extract_cycles += cpucycles();
 
 		if (loops % config.print_loops == 0) {
