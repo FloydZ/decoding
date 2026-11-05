@@ -414,16 +414,9 @@ __global__ void KernelPollard(T *__restrict__ pde,          //
 	__shared__ lT pdiHT[iHwidth*kl_length];
 	__shared__ T pds[Hwidth];
 
-	// make sure that the shared mem is actually filled completely
-	assert(blockDim.x >= kl_length);
-
 	// copy the syndrome and the parity check matrix into the shared memory
-	if (threadIdx.x < kl_length) {
-		// NOTE: see `cuLeeBrickellNoMem` to understand what im doing
-		#pragma unroll
-		for (uint32_t i = 0; i < iHwidth; i++) {
-			pdiHT[threadIdx.x + threadIdx.x*i] = pdiHT2[threadIdx.x + threadIdx.x*i];
-		}
+	for (uint32_t i = threadIdx.x; i < iHwidth*kl_length; i += blockDim.x) {
+		pdiHT[i] = pdiHT2[i];
 	}
 
 	if (threadIdx.x < Hwidth) {
@@ -572,7 +565,6 @@ public:
 	constexpr static uint32_t Hwidth = (n-k+31u)/32u;
 	constexpr static uint32_t tpb    = 256;
 	constexpr static uint32_t blocks = (config.nr_steps + tpb - 1u)/tpb;
-	static_assert(kl <= tpb);
 
 	T *dHT = nullptr, *dSol = nullptr;
 	l_type *dlHT = nullptr;
