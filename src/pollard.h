@@ -26,6 +26,12 @@ public:
 	// use Brents algorithm
 	const bool UseBrent = true;
 
+	// `cuPCS` (van Oorschot-Wiener): walks end at points with `D` zero low bits,
+	// the table has 2^log_table entries, `versions` flavours are tried per permutation
+	const uint32_t D = 1;
+	const uint32_t log_table = 16;
+	const uint32_t versions = 1;
+
 	// returns the expected number of iterations
 	[[nodiscard]] constexpr uint64_t compute_loops() const noexcept {
 #ifdef EXPECTED_PERMUTATIONS

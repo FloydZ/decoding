@@ -172,14 +172,54 @@ __global__ void dumer_step3(uint32_t *__restrict__ de,                  // outpu
 ///		cuStern<isdConfig, config> stern{};
 ///		stern.from_string(h, s);
 ///		stern.run();
+/// NOTE: not derived from `Stern`, its cpu hashmaps need GBs for big `l`
 template<const ConfigISD &isd, const ConfigStern &config>
-class cuStern : public Stern<isd, config> {
+class cuStern : public ISDInstance<uint64_t, isd> {
 public:
-	using Base   = Stern<isd, config>;
-	using ISD    = typename Base::ISD;
-	using l_type = typename Base::l_type;
-	using Base::n, Base::k, Base::w, Base::p, Base::l, Base::kl_half;
-	using Base::solutions, Base::ws, Base::syndrome, Base::lHT, Base::not_found, Base::loops;
+	using ISD    = ISDInstance<uint64_t, isd>;
+	using Error  = typename ISD::Error;
+	using Label  = typename ISD::Label;
+	using l_type = typename ISD::l_type;
+	using ISD::HT, ISD::e, ISD::P, ISD::expected_loops;
+	using ISD::ws, ISD::syndrome, ISD::lHT, ISD::not_found, ISD::loops;
+
+	constexpr static uint32_t n = isd.n;
+	constexpr static uint32_t k = isd.k;
+	constexpr static uint32_t w = isd.w;
+	constexpr static uint32_t p = isd.p;
+	constexpr static uint32_t l = isd.l;
+	constexpr static uint32_t kl_half = (k+l)/2;
+	static_assert((p > 0) && (l > 0));
+
+	// rows of `HT` of the solution
+	size_t solutions[2*p] = {0};
+
+	/// same as `Stern::reconstruct`
+	void __attribute__ ((noinline))
+	reconstruct() noexcept {
+		Error tmpe;
+		Label tmp;
+		// copy in the syndrome
+		tmp = ws;
+		for (uint32_t i = 0; i < 2*p; ++i) {
+			assert(solutions[i] < k+l);
+			Label::add(tmp.ptr(), tmp.ptr(), HT.row(solutions[i]));
+		}
+
+		for (uint32_t i = 0; i < n-k; ++i) {
+			const auto bit = tmp.get(i);
+			tmpe.set(bit, 0, n-k-1-i);
+		}
+
+		for (uint32_t i = 0; i < 2*p; ++i) {
+			tmpe.set(1, 0, n-k-l + solutions[i]);
+		}
+
+		// apply back permutation.
+		for (uint32_t i = 0; i < n; ++i) {
+			e.set(tmpe.get(0, i), 0, P.values[i]);
+		}
+	}
 
 	// the kernels count the weight with `__popc`
 	using T = uint32_t;
@@ -196,7 +236,9 @@ public:
 	uint32_t *dSol = nullptr, *dCompare = nullptr;
 	std::vector<T> hHT;
 
-	cuStern() noexcept : Base(), hHT((kl+1u)*Hwidth) {
+	cuStern() noexcept : ISD(), hHT((kl+1u)*Hwidth) {
+		expected_loops = bc(n, w)/(bc(n-k-l, w-2*p) * bc(kl_half, p) * bc(kl_half, p));
+
 		// all `p` out of `kl_half` combinations in lexicographical order
 		std::vector<uint32_t> hC(size_t(nr_combinations)*p);
 		uint32_t c[p];
@@ -261,7 +303,7 @@ public:
 		}
 
 		if (!not_found) {
-			Base::reconstruct();
+			reconstruct();
 		}
 		return loops;
 	}
